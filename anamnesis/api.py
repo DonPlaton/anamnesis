@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Anamnesis — stable in-process Python API.
+
+The CLIs (`memory_search`, `remember`, `ingest`) and the MCP server are the
+universal interface, but a Python caller — a framework adapter, a custom agent, a
+notebook — shouldn't have to shell out. This module is that library surface: three
+functions, stdlib-only, no argparse, no `sys.exit`. The CLIs and the LangChain /
+LlamaIndex integrations and the generic `capture` decorator are all thin shims over
+these, so there is exactly one write path and one read path.
+
+    from anamnesis.api import recall, remember, capture_session
+
+    remember("Crash-safe writes", project="myproj", type="pattern",
+             prevention="write to a tmp file then os.replace — never partial files")
+    hits = recall("how do I persist files safely", project="myproj", k=5)
+    capture_session(transcript_text, project="myproj", agent="my-bot")
+"""
+import os
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+sys_path_root = str(Path(__file__).resolve().parent)
+import sys
+if sys_path_root not in sys.path:
+    sys.path.insert(0, sys_path_root)
+import memory_hook as m
+import memory_search as _search
+
+
+def recall(query: str, project: str | None = None, k: int = 5,
+           *, rerank: bool = False) -> list[dict]:
+    """Rank memory notes for `query`. Returns a list (≤ k) of dicts with keys:
+    `score, ntype, project, title, stem, description, prevention`. Empty list when
+    nothing is embedded or matches. Semantic (embedding cosine) with a GPU-free
+    lexical fallback when Ollama is busy; `rerank=True` adds an opt-in cloud rerank."""
+    if not query or not query.strip():
+        return []
+    results, _mode = _search.search_core(query, project, k, rerank=rerank)
+    return results
+
+
+def format_note(result: dict) -> str:
+    """Render a `recall()` result as a compact block for an LLM context window or a
+    human: 'TYPE — title' then the description, then 'Prevention: …' (empties omitted).
+    Shared by the LangChain/LlamaIndex adapters and the capture helpers so every
+    surface renders a memory the same way."""
+    nt = (result.get("ntype") or "").strip()
+    head = (result.get("title") or "").strip()
+    lines = [f"{nt.upper()} — {head}" if nt and head else (head or nt)]
+    desc = (result.get("description") or "").strip()
+    prev = (result.get("prevention") or "").strip()
+    if desc:
+        lines.append(desc)
+    if prev:
+        lines.append(f"Prevention: {prev}")
+    return "\n".join(ln for ln in lines if ln)
+
+
+def remember(title: str, *, project: str, type: str = "pattern",
+             description: str = "", prevention: str = "", tags=(),
+             supersedes: str = "", embed: bool = True) -> str | None:
+    """Write one typed memory note and return its stem, or None if it was rejected
+    as a prompt-injection payload. `type` ∈ {pattern, mistake, decision}. Embeds
+    immediately when the embedder is free (so it is recallable at once); otherwise
+    the note is written and folded into semantic recall on the next embed run.
+
+    Raises ValueError on bad arguments and RuntimeError if the vault lock is busy."""
+    if type not in m.TYPED_TYPES:
+        raise ValueError(f"type must be one of {sorted(m.TYPED_TYPES)}")
+    if not project or not title:
+        raise ValueError("project and title are required")
+    proj = m.slug_project(project)
+    tag_list = m._norm_tags(tags.split(",") if isinstance(tags, str) else list(tags))
+    item = {"title": title, "description": description or "",
+            "prevention": prevention or "", "supersedes": supersedes or ""}
+    if not m.acquire_lock(timeout_s=60):
+        raise RuntimeError("vault busy (lock held by another process) — try again")
+    try:
+        date = datetime.now().strftime("%Y-%m-%d")
+        stem = m.write_typed_note(m.TYPE_FOLDER[type], item, proj, date, tag_list, type)
+        if not stem:
+            return None
+        if embed and m.embedder_available(2):
+            m.update_embeddings([(stem, type, proj, title,
+                                  description or "", prevention or "")])
+        m.rebuild_index()
+        m.git_autocommit()
+        return stem
+    finally:
+        m.release_lock()
+
+
+def remember_lessons(lessons, *, project: str, embed: bool = True) -> list[str]:
+    """Write a BATCH of agent-extracted lessons — the turnkey "the agent is the
+    extractor" path (#34). No separate extraction model runs: the agent (Claude Code
+    or any LLM) decides what it learned, emits structured lessons, and this persists
+    them through the same write path as `remember()`. Each lesson is a dict with keys
+    `type` (pattern|mistake|decision), `title`, and optional `description`,
+    `prevention`, `tags`, `supersedes`. Returns the written stems (lessons that are
+    malformed, untitled, or rejected as injection-shaped are skipped, not raised).
+
+    One vault lock / one index rebuild / one git commit for the whole batch — so an
+    agent recording five lessons at end-of-task doesn't produce five commits. Empty
+    list → no-op. Raises RuntimeError only if the vault lock can't be acquired."""
+    if not project:
+        raise ValueError("project is required")
+    proj = m.slug_project(project)
+    valid = []
+    for ln in lessons or []:
+        if not isinstance(ln, dict):
+            continue
+        title = (ln.get("title") or "").strip()
+        typ = (ln.get("type") or "pattern").strip()
+        if not title or typ not in m.TYPED_TYPES:
+            continue
+        valid.append((typ, title, ln))
+    if not valid:
+        return []
+    if not m.acquire_lock(timeout_s=60):
+        raise RuntimeError("vault busy (lock held by another process) — try again")
+    try:
+        date = datetime.now().strftime("%Y-%m-%d")
+        written, embed_recs = [], []
+        for typ, title, ln in valid:
+            raw_tags = ln.get("tags") or ()
+            tag_list = m._norm_tags(raw_tags.split(",") if isinstance(raw_tags, str)
+                                    else list(raw_tags))
+            item = {"title": title, "description": ln.get("description") or "",
+                    "prevention": ln.get("prevention") or "",
+                    "supersedes": ln.get("supersedes") or ""}
+            stem = m.write_typed_note(m.TYPE_FOLDER[typ], item, proj, date, tag_list, typ)
+            if stem:                       # None == rejected (injection-shaped) — skip it
+                written.append(stem)
+                embed_recs.append((stem, typ, proj, title,
+                                   item["description"], item["prevention"]))
+        if embed and embed_recs:
+            # vectors when an embedder is up, else text-only (still FTS-recallable, #32)
+            m.update_embeddings(embed_recs)
+        if written:
+            m.rebuild_index()
+            m.git_autocommit()
+        return written
+    finally:
+        m.release_lock()
+
+
+def capture_session(text: str, *, project: str | None = None,
+                    agent: str | None = None, session_id: str | None = None,
+                    cwd: str | None = None, trigger: str = "ingest") -> dict:
+    """Extract memory from a finished agent session: the same extraction →
+    Patterns/Mistakes/Decisions → Context → embeddings pipeline the live hook and
+    `ingest.py` run, tagged with `agent`. Returns a summary dict:
+    `{stored, project, agent, patterns, mistakes, decisions, session_id}`.
+
+    A stable `session_id` makes re-ingestion idempotent. Needs an LLM backend
+    (cloud key or local Ollama); raises RuntimeError if none is reachable or the
+    vault lock is busy, ValueError on empty text."""
+    if not text or not text.strip():
+        raise ValueError("empty transcript text")
+    agent = (agent or m.DEFAULT_AGENT).strip() or m.DEFAULT_AGENT
+    cwd = cwd or os.getcwd()
+    sid = session_id or f"ingest-{uuid.uuid4().hex[:16]}"
+    if not m.llm_available():
+        raise RuntimeError("no LLM backend (cloud key unset + Ollama down)")
+    if not m.acquire_lock(timeout_s=120):
+        raise RuntimeError("could not acquire vault lock — another process is busy")
+    try:
+        m.VAULT.mkdir(parents=True, exist_ok=True)
+        db = m.load_processed()
+        run_log: list[dict] = []
+        ok = m.process_session(sid, cwd, "", trigger, db, run_log=run_log,
+                               agent=agent, transcript_text=text,
+                               project_override=project)
+        if ok:
+            m.rebuild_index()
+            m.archive_old_sessions()
+            m.archive_old_typed()
+            m.prune_processed_db(db)
+            m.git_autocommit()
+        r = run_log[-1] if run_log else {}
+        return {"stored": bool(ok), "project": r.get("project", project),
+                "agent": agent, "patterns": r.get("patterns", 0),
+                "mistakes": r.get("mistakes", 0), "decisions": r.get("decisions", 0),
+                "session_id": sid}
+    finally:
+        m.release_lock()

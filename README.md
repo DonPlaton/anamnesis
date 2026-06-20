@@ -1,0 +1,247 @@
+<div align="center">
+
+# 🧠 Anamnesis
+
+### Local-first long-term memory for AI coding agents, in plain Markdown and Git.
+
+*Your coding agent forgets everything the moment a session ends. Anamnesis is the part that
+remembers. It keeps the bug you hit last week, the pattern that finally worked, and the reason
+you picked Postgres over Mongo, then hands the relevant ones back before the agent asks.*
+
+**No database. No server. No cloud. No API keys required. Zero pip dependencies.**
+
+[![tests](https://github.com/DonPlaton/anamnesis/actions/workflows/ci.yml/badge.svg)](https://github.com/DonPlaton/anamnesis/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/DonPlaton/anamnesis/actions/workflows/codeql.yml/badge.svg)](https://github.com/DonPlaton/anamnesis/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://github.com/DonPlaton/anamnesis/actions/workflows/scorecard.yml/badge.svg)](https://github.com/DonPlaton/anamnesis/actions/workflows/scorecard.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](#install)
+[![Core deps](https://img.shields.io/badge/core%20deps-0%20(stdlib)-orange)](#why-anamnesis)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![LongMemEval](https://img.shields.io/badge/LongMemEval%20R%405-0.80%20%E2%80%BA%20Mem0%200.76-blueviolet)](#benchmarks)
+
+```text
+$ # days ago, a different session, your agent hit a CUDA OOM and Anamnesis recorded the lesson.
+$ # now, a fresh agent, a new prompt:
+$ python anamnesis/memory_search.py "training crashes out of gpu memory" myproject
+
+⚠ 1 relevant lesson recalled (confidence 0.68):
+  • [mistake] CUDA OOM at batch=64 on this GPU
+    → lower batch size or enable gradient checkpointing; it recurred twice.
+```
+
+<sub>▶ See it live in 25 seconds: **`python examples/demo.py`** (any OS) or **`bash examples/demo.sh`** · recording a GIF: [docs/DEMO.md](docs/DEMO.md)</sub>
+
+</div>
+
+---
+
+## The pitch
+
+Every morning your agent starts from zero. It re-reads the same files, rediscovers the same
+gotchas, and now and then repeats the exact mistake it made on Tuesday. You are paying tokens to
+re-teach it your own project on a loop.
+
+Anamnesis gives it a memory. It watches each session, distils the durable lessons into short
+Markdown notes, commits them to git, and feeds the relevant ones back at the start of the next
+session and again as you type each prompt. The agent stops re-learning and starts recollecting.
+
+The part most memory tools get wrong is the store itself. Here it is just files. You can open it
+in Obsidian, grep it, diff it, and copy the folder to move your agent's brain to another machine.
+There is no vector database to run and no service to trust. Embeddings run locally on Ollama by
+default, or on a single cloud key if you would rather not run a local model.
+
+And it is not a toy. On the public LongMemEval benchmark, with the same local embedder for every
+system, Anamnesis out-retrieves the funded hosted leaders (Mem0, LangMem, A-MEM) on every metric,
+and you can reproduce that in one command. The numbers, and an honest account of what we tried and
+cut to get there, are [below](#benchmarks).
+
+```bash
+git clone https://github.com/DonPlaton/anamnesis && cd anamnesis
+python install.py
+```
+
+`install.py` detects your backend, prints what it chose, and wires Claude Code. Your next session
+starts with its memory already loaded. The five-minute walkthrough is in [QUICKSTART.md](QUICKSTART.md).
+
+> **Why not Mem0, Zep, or Letta?** Those are a hosted service plus a vector database you ship your
+> data to. Anamnesis is plain files on your disk that you can read, grep, and diff, and nothing
+> leaves the machine by default. The honest, benchmarked comparison is [further down](#benchmarks).
+
+## Why Anamnesis
+
+|  | Anamnesis | Mem0 / Zep / Letta / Cognee |
+|---|---|---|
+| **Runs** | your machine, local files | a service, vector DB, or cloud |
+| **Store format** | human-readable Markdown + Git | opaque DB rows and embeddings |
+| **Dependencies** | **0** Python packages (stdlib core), local Ollama for embeddings (or an optional cloud embedder) | many, usually a server plus a DB |
+| **Your data leaves the machine?** | **never** by default (local embeddings; cloud embedder is opt-in) | usually, via cloud APIs |
+| **Auto-capture** | ✅ native for Claude Code, always-on daemon for the rest | manual API calls |
+| **Open in Obsidian** | ✅ it is your vault | ✗ |
+| **Honest about what works** | ✅ we publish the negative results | rarely |
+
+You own every byte of your agent's memory, and you can read it.
+
+## See it work
+
+```
+$ # session 1: you hit a CUDA OOM, Anamnesis quietly records the lesson
+$ # ...days later, session 2, a fresh agent, new prompt:
+$ python anamnesis/memory_search.py "training crashes out of gpu memory" myproject
+
+⚠ 1 relevant lesson recalled (confidence 0.68):
+  • [mistake] CUDA OOM at batch=64 on this GPU
+    → lower batch size or enable gradient checkpointing; it recurred twice.
+```
+
+In Claude Code this happens automatically at session start and on each prompt. The agent simply
+already knows.
+
+## How it works
+
+```
+  your session (any agent)
+        │  Claude Code hook  ·  MCP call  ·  ingest.py  ·  watch daemon
+        ▼
+  extract → mistakes · patterns · decisions     (local Ollama, or one cloud key; secrets redacted)
+        │  + a per-project "card" (status · stack · open gotchas · decisions)
+        │  + local embeddings (bge-m3, multilingual)   + git auto-commit
+        ▼
+  Markdown + Git store   (open in Obsidian if you like)
+        │  SessionStart     → inject the project card and the relevant lessons
+        │  UserPromptSubmit → task-aware recall by the prompt text
+        │  anytime          → memory_search "<query>"  ·  MCP  ·  CLI
+        ▼
+              the agent recollects
+```
+
+Retrieval is hybrid: semantic search over local embeddings, fused with lexical search, behind a
+calibrated abstention gate. A nonsense query gets back *"no confident match"* instead of a
+confident wrong answer, which matters more for a memory than chasing one extra point of recall.
+Newer lessons supersede older ones so contradictions do not pile up, and a fix links to the bug it
+resolved.
+
+## Memory for any agent
+
+Claude Code is the zero-config case. `install.py` wires four hooks and capture is automatic from
+then on, with nothing to configure.
+
+Every other agent that writes its sessions to disk (Codex, Cline, Roo, Aider, Gemini CLI) is
+covered by `anamnesis watch`, a small stdlib polling daemon that finds the known log folders on
+your machine and mines finished sessions as they land. Start it once at login and forget it. The
+same engine also runs as a one-shot sweep if you prefer cron over a resident process.
+
+If you call models from Python, wrap the client in one line with `auto_capture(client)` or decorate
+a chat function with `@capture_chat`. Any MCP client such as Cursor, Claude Desktop, or Zed can
+talk to `anamnesis/mcp_server.py` for search, remember, and ingest. LangChain and LlamaIndex get
+drop-in retriever and memory adapters. The agent can even write its own lessons through
+`remember_lessons` with no separate extraction model at all. Copy-paste recipes for each live in
+[INTEGRATIONS.md](docs/INTEGRATIONS.md). One honest caveat: Cursor and Windsurf keep their chat in a
+SQLite blob rather than plain files, so they need an export step before the watcher can read them.
+
+## Benchmarks
+
+External and reproducible, on **LongMemEval-oracle** (940 sessions in one shared store, 500
+human-annotated questions, local `bge-m3`):
+
+| method | R@1 | R@5 | R@10 | MRR |
+|---|---|---|---|---|
+| semantic | 0.42 | 0.65 | 0.73 | 0.53 |
+| lexical (BM25) | 0.52 | 0.75 | 0.83 | 0.62 |
+| **calibrated fusion (shipped default, 0 deps)** | 0.55 | **0.80** | **0.86** | 0.66 |
+| **+ trained cross-encoder (opt-in)** | **0.61** | **0.83** | 0.86 | **0.71** |
+
+The shipped ranker fuses the semantic and lexical signals with calibrated score fusion, which lifts
+R@5 from 0.66 under the rank fusion most systems ship to 0.80. The optional cross-encoder
+(bge-reranker-v2-m3, `ANAMNESIS_XRERANK=1`, `[reranker]` extra) then takes top-1 to 0.61. Reproduce
+with `python anamnesis/research/longmem_eval.py [--xrerank]` (the dataset is fetched separately).
+
+**The head-to-head, run locally and reported straight.** On the same stand with the same local
+embedder for everyone, we ran Mem0, LangMem, and A-MEM end to end on Ollama, no paid key. Anamnesis
+leads every metric: R@5 0.80 against Mem0's 0.758, LangMem and A-MEM at 0.692, and top-1 0.55 (0.61
+with the reranker) against Mem0's 0.478. The win is the fusion, not the embedder, which is identical
+for all four. We are careful about what is a moat: calibrated score fusion is classic retrieval, so
+the durable edge is the substrate (plain files, $0, local, no server), and we publish the full table
+plus what we tried and cut in [COMPARISON.md](docs/COMPARISON.md) and
+[research/RETRIEVAL_FUSION.md](anamnesis/research/RETRIEVAL_FUSION.md).
+
+### What we measured, and what we cut
+
+Most memory projects pile on clever ranking and assume it helps. We built the clever parts,
+measured them on real data, and deleted the ones that lost, because a memory you cannot trust is
+worse than none.
+
+A promptable LLM reranker actually lowered top-1 precision against the plain bi-encoder, so it is
+gone. We A/B tested four "stronger" local embedders and none beat bge-m3 at top-1, so the default
+is unchanged. Abstractive consolidation, the trick of summarising many notes into one principle,
+dropped real recall@3 from 0.82 to 0.35, because a general principle embeds away from the specific
+question that needs it, so it never shipped. The recurrence prior is a sound mechanism that stays
+dormant on a young single-user store, so it sits off the hot path. The one idea that earned its
+place was the trained cross-encoder, and we only learned which was which by measuring. The
+write-ups live in [the research directory](anamnesis/research/), heading to Zenodo and arXiv.
+
+## What is in the box
+
+Everything here ships today. Bi-temporal point-in-time queries answer "what did we believe on date
+X". Supersession with contradiction detection keeps conflicting notes from piling up. Recall walks
+`[[wikilinks]]` for multi-hop answers, abstains when nothing is a confident match, and transfers
+lessons across projects. Secrets are redacted on the way in, and a memory-poisoning guard caught
+injection, exfiltration, and destruction attempts with zero false positives on a 328-note vault.
+Underneath, a SQLite index keeps per-query cost bounded into the tens of thousands of notes, a
+submodular forgetting cap stops unbounded growth, and git handles cross-machine sync. It also reads
+and writes AGENTS.md and the OKF format, so the project card travels to other tools.
+
+## Privacy
+
+Embeddings run locally on Ollama by default, so nothing leaves the machine. If you would rather not
+run a local model, point `ANAMNESIS_EMBED_PROVIDER` at openai, voyage, cohere, or gemini with one
+key and recall goes through that instead. With no embedder at all, recall falls back to lexical
+full-text search rather than going dark. Extraction is local-first, and an optional cloud key
+(Cerebras, Groq, DeepSeek, or Gemini, all zero-retention) only ever speeds it up. Secrets are
+redacted before anything is written or sent. The store is yours, on your disk, under your git.
+
+## Install
+
+```bash
+git clone https://github.com/DonPlaton/anamnesis && cd anamnesis
+python install.py            # idempotent; backs up ~/.claude/settings.json before wiring hooks
+python install.py --ollama   # also pull the local models (bge-m3 embedder + an extraction model)
+python install.py --print    # dry run, shows what it would do and writes nothing
+```
+
+For cloud extraction, copy `.env.example` to `.env` and add one key. With no key it uses local
+Ollama. To skip a local model for recall too, set `ANAMNESIS_EMBED_PROVIDER` with the matching key
+and run `embed_index.py --rebuild` once. With no backend at all, extraction pauses loudly (sessions
+are kept and retried, never dropped) and recall runs on lexical full-text search until an embedder
+shows up.
+
+## Tests
+
+Standard-library only and fully mocked, so no network and no GPU. Twelve core suites run in CI,
+alongside the research suites under `anamnesis/research/`:
+
+```bash
+for t in _test_memory_hook _test_memory_v2 _test_memory_v3 _test_audit_fixes \
+         _test_failure_injection _test_api _test_capture _test_integrations \
+         _test_cloud_embed _test_ingest _test_watch _test_quant; do
+  python anamnesis/$t.py; done
+```
+
+CI runs the core suites on Linux, Windows, and macOS across Python 3.10, 3.12, and 3.13.
+
+## Docs
+
+[Quickstart](QUICKSTART.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[Integrations](docs/INTEGRATIONS.md) · [Configuration](docs/CONFIG.md) ·
+[Benchmarks](docs/BENCHMARKS.md) ·
+[Comparison vs Mem0/Zep/Letta/A-MEM](docs/COMPARISON.md) ·
+[Research, the honest eval lab](anamnesis/research/) ·
+[Security policy](SECURITY.md)
+
+## Author and citation
+
+Built by **Platon Chernov**. If Anamnesis helps your work or your research, a ⭐ is genuinely
+appreciated, and a citation is welcome. A `CITATION.cff` ships with the repo, and the method
+write-up is on its way to Zenodo.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Use it, fork it, build on it.

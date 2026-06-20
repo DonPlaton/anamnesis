@@ -1,0 +1,38 @@
+# secrets — NEVER commit API keys
+.env
+.secrets.env
+*.key
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+
+# local / volatile memory-store artifacts (if a store lives inside the repo)
+.embeddings_cache.json
+.embeddings_meta.json
+.processed_sessions.json
+.prompt_recall/
+.lock
+status.txt
+health.txt
+graph.json
+.logs/
+*.bak
+*.tmp
+
+# editor / OS
+.obsidian/workspace*.json
+.DS_Store
+.idea/
+.vscode/
+
+# LongMemEval dataset + cached embeddings (downloaded separately, large) — but keep the
+# fetch instructions tracked so a cloner knows where to get the data.
+anamnesis/research/data/*
+!anamnesis/research/data/README.md

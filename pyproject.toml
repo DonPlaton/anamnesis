@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anamnesis-memory"
+version = "1.0.0"
+description = "Local-first, agent-agnostic long-term memory for AI coding agents (markdown + git)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Platon Chernov" }]
+keywords = ["memory", "llm", "agents", "mcp", "claude", "rag", "embeddings", "zettelkasten"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []   # standard library only; Ollama/cloud are reached over HTTP
+
+# Everything below is OPTIONAL — the core stays stdlib-only. Install only what you use.
+[project.optional-dependencies]
+reranker = ["torch", "transformers"]   # trained cross-encoder precision boost (ANAMNESIS_XRERANK=1)
+langchain = ["langchain-core"]         # AnamnesisRetriever / AnamnesisMemory adapters
+llamaindex = ["llama-index-core"]      # AnamnesisRetriever for LlamaIndex
+
+[project.urls]
+Homepage = "https://github.com/DonPlaton/anamnesis"
+Repository = "https://github.com/DonPlaton/anamnesis"
+
+[project.scripts]
+anamnesis-search = "anamnesis.memory_search:main"
+anamnesis-remember = "anamnesis.remember:main"
+anamnesis-ingest = "anamnesis.ingest:main"
+anamnesis-watch = "anamnesis.watch:main"
+anamnesis-mcp = "anamnesis.mcp_server:main"
+anamnesis-tasks = "anamnesis.manage_tasks:main"
+
+[tool.setuptools]
+packages = ["anamnesis", "anamnesis.research", "anamnesis.integrations"]
+
+[tool.setuptools.package-data]
+anamnesis = ["*.md"]

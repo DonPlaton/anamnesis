@@ -1,0 +1,10 @@
+# Anamnesis runs on the Python standard library alone — no required deps.
+# Extraction and embeddings talk to local Ollama or a cloud API over plain HTTP
+# (urllib), so there is nothing to pip-install for the core to work.
+#
+# Optional, for the full local experience:
+#   - Ollama (https://ollama.com) running locally, with models pulled:
+#       ollama pull bge-m3        # embeddings (multilingual)
+#       ollama pull qwen3:8b      # local extraction (default; qwen3:30b-a3b / qwen3:32b extract better with more VRAM)
+#
+# Tests use only the standard library (mocked LLM/embedder).
