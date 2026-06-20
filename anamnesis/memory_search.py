@@ -220,10 +220,15 @@ def main():
             as_of_date = a.split("=", 1)[1].strip()
 
     # Entity knowledge graph (no query needed): facet by one entity, the entity graph,
-    # or the typed-relation graph.
+    # the typed-relation graph, or a portable export of the whole graph.
     entity = next((a.split("=", 1)[1] for a in flags if a.startswith("--entity=")), None)
-    if entity or "--entities" in flags or "--relations" in flags:
+    graph_fmt = next(("mermaid" if a == "--graph" else a.split("=", 1)[1]
+                      for a in flags if a == "--graph" or a.startswith("--graph=")), None)
+    if entity or "--entities" in flags or "--relations" in flags or graph_fmt:
         proj = rest[0] if rest else None     # the positional is the project in entity mode
+        if graph_fmt:
+            print(m.graph_export(proj, fmt=graph_fmt, cooccurrence="--cooccurrence" in flags))
+            return
         if entity:
             notes = m.notes_for_entity(entity, proj, k)
             co = m.co_occurring(entity, proj)
@@ -265,7 +270,8 @@ def main():
     if not rest:
         print("usage: memory_search.py <query> [project] [--k=N] [--expand] [--expand-relations] "
               "[--json] [--brief] [--rerank] [--xrerank] [--as-of=YYYY-MM-DD] | --entity=X [project] | "
-              "--entities [project] | --relations [project]", file=sys.stderr)
+              "--entities [project] | --relations [project] | --graph[=mermaid|dot|json] [project]",
+              file=sys.stderr)
         sys.exit(1)
     query = rest[0]
     project = rest[1] if len(rest) > 1 else None

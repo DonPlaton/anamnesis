@@ -326,6 +326,11 @@ RETRIEVAL_CONF_FLOOR = float(os.environ.get("ANAMNESIS_CONF_FLOOR", "0.6"))
 # top hits (RESOLVES/SUPERSEDES/[[wikilinks]]) so "A→B→C" chains are reachable.
 # 0 = off (keeps injection lean); set ANAMNESIS_GRAPH_HOPS=1 to enable by default.
 GRAPH_HOPS = int(os.environ.get("ANAMNESIS_GRAPH_HOPS", "0"))
+# Relation-aware injection (Phase 2b on the hot path): after ranking, append up to N
+# graph-connected lessons reached by the top hits' typed edges (a bug surfaces its fix).
+# 0 = off (default — keeps SessionStart injection precise + token-lean); applied ONLY at
+# SessionStart (a frontmatter scan, once per session), never on the per-prompt path.
+RELATION_EXPAND = int(os.environ.get("ANAMNESIS_RELATION_EXPAND", "0"))
 # Fact-vs-code staleness check (M-4): annotate injected notes whose referenced
 # file paths no longer exist. Off by default (a heuristic — opt in per project).
 STALE_CHECK = os.environ.get("ANAMNESIS_STALE_CHECK", "0") != "0"
@@ -3031,10 +3036,74 @@ def relation_expand(hits, project: str | None = None, max_add: int = 5, rels=Non
                               "title": n["title"], "stem": n["stem"],
                               "description": n.get("desc", ""),
                               "prevention": n.get("prevention", ""),
+                              "recurrence": n.get("recurrence"),
                               "via": f"{rel} -> {t}", "low_confidence": True})
             if len(added) >= max_add:
                 return added
     return added
+
+
+def graph_export(project: str | None = None, fmt: str = "mermaid", top: int = 40,
+                 cooccurrence: bool = False) -> str:
+    """Render the knowledge graph to a portable format: 'mermaid' (renders directly in
+    Obsidian / a GitHub markdown block, no tool to install), 'dot' (Graphviz), or 'json'
+    (nodes/edges for D3 or any custom view). Typed relation edges are directed and
+    labelled; with cooccurrence=True, entities sharing >=2 notes get a dashed undirected
+    edge too. Nodes are capped at `top` by note count, so a large vault stays legible."""
+    notes = _iter_project_notes(project) if project else _iter_all_notes()
+    node_notes: dict = {}                      # entity -> note count
+    rel_edges: dict = {}                       # (src, rel, tgt) -> count
+    cooc: dict = {}                            # (a, b) sorted -> shared-note count
+    for n in notes:
+        ents = n.get("entities") or []
+        for e in ents:
+            node_notes[e] = node_notes.get(e, 0) + 1
+        for edge in n.get("relations") or []:
+            r, t = edge.get("rel"), edge.get("target")
+            if not r or not t:
+                continue
+            node_notes.setdefault(t, 0)        # a target is a node even if untagged
+            for src in ents:
+                if src != t:
+                    rel_edges[(src, r, t)] = rel_edges.get((src, r, t), 0) + 1
+        if cooccurrence:
+            for i, a in enumerate(ents):
+                for b in ents[i + 1:]:
+                    if a != b:
+                        cooc[tuple(sorted((a, b)))] = cooc.get(tuple(sorted((a, b))), 0) + 1
+    keep = {e for e, _ in sorted(node_notes.items(), key=lambda kv: (-kv[1], kv[0]))[:top]}
+    redges = sorted(((s, r, t, c) for (s, r, t), c in rel_edges.items() if s in keep and t in keep),
+                    key=lambda x: (-x[3], x[0], x[2]))
+    cedges = sorted(((a, b, c) for (a, b), c in cooc.items() if c >= 2 and a in keep and b in keep),
+                    key=lambda x: -x[2])
+
+    if fmt == "json":
+        return json.dumps({"nodes": [{"id": e, "notes": node_notes[e]}
+                                     for e in sorted(keep, key=lambda e: (-node_notes[e], e))],
+                           "edges": [{"source": s, "rel": r, "target": t, "notes": c}
+                                     for s, r, t, c in redges],
+                           "cooccurrence": [{"a": a, "b": b, "notes": c} for a, b, c in cedges]},
+                          ensure_ascii=False, indent=1)
+    if fmt == "dot":
+        out = ["digraph anamnesis {", '  rankdir=LR; node [shape=box];']
+        for e in sorted(keep):
+            out.append(f'  "{e}" [label="{e}\\n({node_notes[e]})"];')
+        for s, r, t, c in redges:
+            out.append(f'  "{s}" -> "{t}" [label="{r}"];')
+        for a, b, c in cedges:
+            out.append(f'  "{a}" -> "{b}" [dir=none, style=dashed];')
+        out.append("}")
+        return "\n".join(out)
+    # mermaid (default)
+    ids = {e: f"n{i}" for i, e in enumerate(sorted(keep))}
+    out = ["graph LR"]
+    for e in sorted(keep):
+        out.append(f'  {ids[e]}["{e}"]')
+    for s, r, t, c in redges:
+        out.append(f'  {ids[s]} -->|{r}| {ids[t]}')
+    for a, b, c in cedges:
+        out.append(f'  {ids[a]} -.- {ids[b]}')
+    return "\n".join(out)
 
 
 # tags that carry no topical signal in the "stack/themes" line
@@ -3908,6 +3977,7 @@ def retrieve_relevant(project: str, query: str, k: int,
                       embed_timeout: int | None = None,
                       alive_timeout: int = 2, cache: dict | None = None,
                       expand_hops: int | None = None,
+                      graph_expand: int = 0,
                       recency_fallback: bool = True) -> list[dict]:
     """Top-k relevant typed notes for the project (audit C3/H4/H5/I-2).
 
@@ -3996,7 +4066,21 @@ def retrieve_relevant(project: str, query: str, k: int,
                     present.add(ln)
                     extra.append(ln)
         top = (top + extra)[:k + k]      # cap total at 2k
-    return [_hit(s, rec_of[s]) for s in top]
+    hits = [_hit(s, rec_of[s]) for s in top]
+    # Relation-aware expansion (Phase 2b on the hot path): append a TIGHTLY bounded set of
+    # lessons reached by the precise hits' typed edges, so a session-start card about a bug
+    # also carries its fix. Opt-in (graph_expand>0, SessionStart only) and purely additive:
+    # the precise hits keep their order and the budget-aware injector truncates the tail, so
+    # graph notes never displace a precise one. relation_expand reads frontmatter (a scan),
+    # which is why this is off the per-prompt path.
+    if graph_expand > 0 and hits:
+        present = {h["stem"] for h in hits}
+        for ex in relation_expand(hits, project, max_add=graph_expand):
+            if ex["stem"] not in present:
+                hits.append({"ntype": ex["ntype"], "title": _strip_lead_icon(ex.get("title", "")),
+                             "stem": ex["stem"], "recurrence": ex.get("recurrence"),
+                             "via": ex.get("via")})
+    return hits
 
 
 def as_of(project: str, date: str) -> list[dict]:
@@ -4169,7 +4253,8 @@ def _fact_line(r: dict, stale: bool = False) -> str:
     title = r.get("title", "").strip()
     marker = _age_marker(r.get("stem", ""), r.get("recurrence"))
     flag = " ⚠️_(возможно устарело: файл не найден)_" if stale else ""
-    return f"- **{title}**" + (f" — {snip}" if snip else "") + marker + flag
+    via = f" _(связано: {r['via']})_" if r.get("via") else ""   # graph-expanded lesson (Phase 2b)
+    return f"- **{title}**" + (f" — {snip}" if snip else "") + marker + via + flag
 
 
 def _user_brief(max_chars: int = 320) -> str:
@@ -4198,7 +4283,8 @@ def emit_session_start_context(cwd: str) -> None:
     # SQLite index → no JSON parse (audit C2); else load once for both rankers
     ensure_scale_index()      # build on first need so the fast path is taken (audit A2)
     rcache = None if scale_index_ready() else load_embed_cache()
-    relevant = retrieve_relevant(project, brief or project, RETRIEVAL_TOP_K, cache=rcache)
+    relevant = retrieve_relevant(project, brief or project, RETRIEVAL_TOP_K, cache=rcache,
+                                 graph_expand=RELATION_EXPAND)   # SessionStart-only, opt-in
     if not brief and not relevant:
         return  # nothing useful to inject
     # Budget-aware assembly (M-15/M-d): the cap bounds the WHOLE payload, not just

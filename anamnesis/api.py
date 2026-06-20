@@ -109,6 +109,15 @@ def relation_graph(project: str | None = None, top: int = 30) -> dict:
     return m.relation_graph(project, top)
 
 
+def graph_export(project: str | None = None, fmt: str = "mermaid", top: int = 40,
+                 cooccurrence: bool = False) -> str:
+    """Render the knowledge graph to a portable string: `mermaid` (renders in Obsidian /
+    a GitHub markdown block, no tool needed), `dot` (Graphviz), or `json` (nodes/edges).
+    Typed relation edges are directed and labelled; `cooccurrence=True` adds dashed edges
+    for entities that share notes."""
+    return m.graph_export(project, fmt, top, cooccurrence)
+
+
 def remember(title: str, *, project: str, type: str = "pattern",
              description: str = "", prevention: str = "", tags=(),
              supersedes: str = "", entities=(), relations=None,

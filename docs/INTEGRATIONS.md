@@ -58,7 +58,12 @@ MCP client:
 python anamnesis/memory_search.py --entity=cuda myproj     # a lesson's notes, co-occurrence, and edges
 python anamnesis/memory_search.py --entities myproj        # the project's entity graph
 python anamnesis/memory_search.py --relations myproj       # the project's typed-relation graph
+python anamnesis/memory_search.py --graph=mermaid myproj   # export the graph (mermaid | dot | json)
 ```
+
+`graph_export(fmt="mermaid"|"dot"|"json")` renders the whole graph for a visual: Mermaid drops
+straight into an Obsidian note or a GitHub markdown block, DOT into Graphviz, JSON into D3 or your
+own viewer.
 
 The MCP `memory_entities` tool exposes all of it to any MCP client. No database, no embedder: the
 graph reads straight from your note frontmatter.
@@ -67,7 +72,9 @@ The edges also feed **relation-aware retrieval**: `recall(query, expand_relation
 lessons the hits' typed edges reach, so a query about a bug surfaces its fix even when the fix shares
 no words with the query. Off by default (plain recall is unchanged); each expansion result carries a
 `via` field naming the edge that pulled it in. From the CLI it is `memory_search.py "query" myproj
---expand-relations`, and the MCP `memory_search` tool takes an `expand_relations` flag.
+--expand-relations`, and the MCP `memory_search` tool takes an `expand_relations` flag. To make the
+**SessionStart** card relation-aware too (so a project's bug also carries its fix automatically), set
+`ANAMNESIS_RELATION_EXPAND=N`; it stays off the per-prompt path to keep that precise and token-lean.
 
 ## Generic capture (any agent)
 

@@ -207,5 +207,49 @@ with tempfile.TemporaryDirectory() as td:
     check("api.recall exposes expand_relations (off by default)",
           inspect.signature(api.recall).parameters["expand_relations"].default is False)
 
+# ── graph export (mermaid / dot / json) ─────────────────────────────────────────
+print("graph export")
+with tempfile.TemporaryDirectory() as td:
+    m.VAULT = Path(td)
+    m.write_typed_note("Mistakes", {"title": "OOM", "entities": ["cuda"],
+        "relations": [{"rel": "fixed-by", "target": "gradient-checkpointing"}]},
+        "g", "2026-06-01", [], "mistake")
+    m.write_typed_note("Patterns", {"title": "Grad checkpoint", "entities": ["gradient-checkpointing"]},
+        "g", "2026-06-02", [], "pattern")
+    mer = m.graph_export("g", "mermaid")
+    check("mermaid: header + a labelled edge", mer.startswith("graph LR") and "fixed-by" in mer)
+    dot = m.graph_export("g", "dot")
+    check("dot: digraph + the edge", dot.startswith("digraph") and "fixed-by" in dot)
+    import json as _json
+    j = _json.loads(m.graph_export("g", "json"))
+    check("json: nodes + a fixed-by edge",
+          bool(j["nodes"]) and any(e["rel"] == "fixed-by" for e in j["edges"]))
+    check("api.graph_export renders mermaid", "graph LR" in api.graph_export("g"))
+
+# ── hot-path relation expansion (opt-in, SessionStart-only) ─────────────────────
+print("hot-path relation expansion (opt-in)")
+with tempfile.TemporaryDirectory() as td:
+    m.VAULT = Path(td)
+    _emb, _avail, _gc = m.embed_text, m.embedder_available, m.git_autocommit
+    m.embed_text = lambda *a, **k: [0.1] * 8        # constant vec → ranking falls to lexical BM25
+    m.embedder_available = lambda *a, **k: True
+    m.git_autocommit = lambda *a, **k: None
+    try:
+        api.remember("Out of memory crash", project="g", type="mistake",
+                     description="ran out of vram at large batch", entities=["oom"],
+                     relations=[{"rel": "fixed-by", "target": "gradient-checkpointing"}])
+        api.remember("Gradient checkpointing", project="g", type="pattern",
+                     description="recompute activations", entities=["gradient-checkpointing"])
+        base = m.retrieve_relevant("g", "out of memory crash", 1, graph_expand=0)
+        exp = m.retrieve_relevant("g", "out of memory crash", 1, graph_expand=2)
+        check("default (graph_expand=0) returns the precise hit, no via",
+              base and all(not h.get("via") for h in base))
+        check("graph_expand>0 appends a graph-connected lesson", len(exp) > len(base))
+        check("the appended hit is marked with via", any(h.get("via") for h in exp))
+        check("retrieve_relevant exposes graph_expand (default 0)",
+              inspect.signature(m.retrieve_relevant).parameters["graph_expand"].default == 0)
+    finally:
+        m.embed_text, m.embedder_available, m.git_autocommit = _emb, _avail, _gc
+
 print(f"\n{P} passed, {F} failed")
 sys.exit(1 if F else 0)

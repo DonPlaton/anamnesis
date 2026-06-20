@@ -152,6 +152,7 @@ After setting `ANAMNESIS_EMBED_QUANT`, rebuild the index once the same way.
 |---|---|---|
 | `ANAMNESIS_PREFILTER_LIMIT` | `600` | Past this many candidates, FTS-prefilter then cosine-rerank the top; bounds per-prompt cost. |
 | `ANAMNESIS_GRAPH_HOPS` | `0` | Multi-hop graph expansion over `[[wikilinks]]` (0 = off). |
+| `ANAMNESIS_RELATION_EXPAND` | `0` | Append up to N graph-connected lessons (reached by the top hits' typed relation edges) to the **SessionStart** card, so a bug also carries its fix. 0 = off (keeps injection precise + token-lean); never runs on the per-prompt path. See `docs/INTEGRATIONS.md` (entity graph). |
 
 ## Capture / sweep / ingest
 
