@@ -44,12 +44,17 @@ below is read in context:
    non-issue under the single-user threat model (you own every session); the opt-in
    corroboration quarantine covers the multi-tenant case; provenance (`sources`, `confidence`)
    is stored so a note's support is auditable. Documented as an accepted boundary.
-3. **Entity-typed knowledge graph.** The one real feature gap. **Phase 1 shipped (2026-06-20):**
-   the extraction LLM now tags each lesson with its key entities (tools/concepts/files), stored
-   normalised in frontmatter, so memory is a faceted graph with no database and no embedder.
-   `notes_for_entity`, `co_occurring`, `entity_graph` (Python API), `--entity` / `--entities`
-   (CLI), and the `memory_entities` MCP tool expose "show everything about X" and co-occurrence.
-   Phase 2 (next): typed relation edges (`X caused-by Y`) for relation-aware multi-hop.
+3. **Entity-typed knowledge graph. CLOSED (2026-06-20).** The one real feature gap, now shipped
+   in two phases with no database and no embedder (the graph reads straight from note frontmatter).
+   **Phase 1:** the extraction LLM tags each lesson with its key entities (tools/concepts/files),
+   stored normalised, giving faceted recall and co-occurrence (`notes_for_entity`, `co_occurring`,
+   `entity_graph`). **Phase 2:** lessons also carry typed relation edges (`caused-by`, `fixed-by`,
+   `depends-on`, ...), so the graph is traversable: `related_by(entity, rel)` returns typed edges
+   and each target is itself an entity, so multi-hop works (`cuda --fixed-by--> grad-checkpointing
+   --requires--> pytorch`); `relation_graph` is the overview. All of it is on every surface: the
+   Python API, the CLI (`--entity` / `--entities` / `--relations`), and the `memory_entities` MCP
+   tool. 45 regression tests (`_test_entities.py`). This matches the entity/relation extraction the
+   leaders use, but over markdown with zero new dependency.
 4. **No multi-tenant server / horizontal scale.** An explicit non-goal: local-first files are
    the whole thesis. Multi-machine is already supported (the store is git; `sync.py` mirrors
    it), but a hosted multi-tenant service is out of scope by design.

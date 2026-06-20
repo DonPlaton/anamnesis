@@ -219,23 +219,38 @@ def main():
         elif a.startswith("--as-of="):
             as_of_date = a.split("=", 1)[1].strip()
 
-    # Entity knowledge graph (no query needed): facet by one entity or show the graph.
+    # Entity knowledge graph (no query needed): facet by one entity, the entity graph,
+    # or the typed-relation graph.
     entity = next((a.split("=", 1)[1] for a in flags if a.startswith("--entity=")), None)
-    if entity or "--entities" in flags:
+    if entity or "--entities" in flags or "--relations" in flags:
         proj = rest[0] if rest else None     # the positional is the project in entity mode
         if entity:
             notes = m.notes_for_entity(entity, proj, k)
+            co = m.co_occurring(entity, proj)
+            edges = m.related_by(entity, project=proj)
             if "--json" in flags:
-                print(json.dumps([{"ntype": n["ntype"], "title": n["title"], "stem": n["stem"],
-                                   "project": n.get("project"), "entities": n.get("entities", [])}
-                                  for n in notes], ensure_ascii=False, indent=2))
+                print(json.dumps({"entity": entity, "notes": [
+                    {"ntype": n["ntype"], "title": n["title"], "stem": n["stem"],
+                     "project": n.get("project")} for n in notes],
+                    "co_occurring": [{"entity": e, "shared": c} for e, c in co],
+                    "relations": edges}, ensure_ascii=False, indent=2))
             else:
                 print(f"{len(notes)} note(s) tagged {entity!r}" + (f" [{proj}]" if proj else "") + ":")
                 for n in notes:
                     print(f"  {ICON.get(n['ntype'], '·')} {n['title']}  ({n['stem']})")
-                co = m.co_occurring(entity, proj)
                 if co:
-                    print("  related: " + ", ".join(f"{e} x{c}" for e, c in co))
+                    print("  co-occurs: " + ", ".join(f"{e} x{c}" for e, c in co))
+                if edges:
+                    print("  edges: " + ", ".join(f"--{e['rel']}--> {e['target']}" for e in edges))
+        elif "--relations" in flags:
+            rg = m.relation_graph(proj)
+            if "--json" in flags:
+                print(json.dumps(rg, ensure_ascii=False, indent=2))
+            else:
+                print(f"Relation graph{(' [' + proj + ']') if proj else ''} — {len(rg)} source(s):")
+                for src, edges in rg.items():
+                    for e in edges:
+                        print(f"  {src} --{e['rel']}--> {e['target']}  (x{e['notes']})")
         else:
             g = m.entity_graph(proj)
             if "--json" in flags:
@@ -249,8 +264,8 @@ def main():
 
     if not rest:
         print("usage: memory_search.py <query> [project] [--k=N] [--expand] [--json] [--brief] "
-              "[--rerank] [--xrerank] [--as-of=YYYY-MM-DD] | --entity=X [project] | --entities [project]",
-              file=sys.stderr)
+              "[--rerank] [--xrerank] [--as-of=YYYY-MM-DD] | --entity=X [project] | "
+              "--entities [project] | --relations [project]", file=sys.stderr)
         sys.exit(1)
     query = rest[0]
     project = rest[1] if len(rest) > 1 else None

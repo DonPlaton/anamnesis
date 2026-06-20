@@ -33,23 +33,35 @@ are LLM-emitted during extraction, normalised to lowercase kebab tokens, and sto
 frontmatter, so the graph reads straight from your files.
 
 ```python
-from anamnesis.api import notes_for_entity, co_occurring, entity_graph
+from anamnesis.api import notes_for_entity, co_occurring, entity_graph, related_by, relation_graph
 
 notes_for_entity("cuda", project="myproj")     # every lesson tagged with this entity, newest first
 co_occurring("cuda", project="myproj")         # [{entity, shared}] entities that share a note with it
 entity_graph(project="myproj")                 # {entity: {notes, links}} overview, most-connected first
 ```
 
-`remember(..., entities=["cuda", "batch-size"])` attaches entities yourself; `remember_lessons`
-takes an `entities` key per lesson. From the CLI and any MCP client:
+Lessons also carry **typed relation edges** (`caused-by`, `fixed-by`, `depends-on`, ...), so the
+graph is traversable, not just faceted. Each edge `target` is itself an entity, so you can hop:
 
-```bash
-python anamnesis/memory_search.py --entity=cuda myproj     # all lessons about an entity (+ related)
-python anamnesis/memory_search.py --entities myproj        # the project's entity graph
+```python
+related_by("cuda", "fixed-by", project="myproj")   # [{rel, target, notes}] — what fixes CUDA issues
+hop = related_by("cuda", "fixed-by", project="myproj")[0]["target"]
+related_by(hop, "requires", project="myproj")      # multi-hop: cuda -> grad-checkpointing -> pytorch
+relation_graph(project="myproj")                   # {entity: [{rel, target, notes}]} typed-edge overview
 ```
 
-The MCP `memory_entities` tool exposes the same to any MCP client. This is the first half of the
-knowledge-graph roadmap (entities and co-occurrence today; typed relation edges next).
+`remember(..., entities=[...], relations=[{"rel": "fixed-by", "target": "..."}])` attaches both
+yourself; `remember_lessons` takes `entities` / `relations` keys per lesson. From the CLI and any
+MCP client:
+
+```bash
+python anamnesis/memory_search.py --entity=cuda myproj     # a lesson's notes, co-occurrence, and edges
+python anamnesis/memory_search.py --entities myproj        # the project's entity graph
+python anamnesis/memory_search.py --relations myproj       # the project's typed-relation graph
+```
+
+The MCP `memory_entities` tool exposes all of it to any MCP client. No database, no embedder: the
+graph reads straight from your note frontmatter.
 
 ## Generic capture (any agent)
 

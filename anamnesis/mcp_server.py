@@ -111,14 +111,18 @@ TOOLS = [
     {
         "name": "memory_entities",
         "description": ("Faceted view of memory by entity (tools, concepts, files). With "
-                        "`entity`: every lesson tagged with it, plus related entities. "
-                        "Without: the entity graph (most-connected entities and their "
-                        "co-occurring neighbours). Read-only."),
+                        "`entity`: every lesson tagged with it, its co-occurring entities, "
+                        "and its typed relation edges (caused-by / fixed-by / depends-on / "
+                        "...). Without: the entity graph, or the typed-relation graph when "
+                        "`relations` is true. Read-only."),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "entity": {"type": "string",
                            "description": "One entity to facet by (optional)."},
+                "relations": {"type": "boolean",
+                              "description": "Show the typed-relation graph instead of the "
+                                             "entity graph (when no `entity`)."},
                 "project": {"type": "string", "description": "Limit to one project (optional)."},
                 "k": {"type": "integer", "description": "Max results (default 12)."},
             },
@@ -221,11 +225,23 @@ def _tool_memory_entities(args: dict) -> tuple[str, bool]:
         if entity:
             notes = m.notes_for_entity(entity, project, k)
             co = m.co_occurring(entity, project)
+            edges = m.related_by(entity, project=project)
             lines = [f"{len(notes)} note(s) tagged {entity!r}"
                      + (f" [{project}]" if project else "") + ":"]
             lines += [f"  [{n['ntype']}] {n['title']}  ({n['stem']})" for n in notes]
             if co:
-                lines.append("related: " + ", ".join(f"{e} x{c}" for e, c in co))
+                lines.append("co-occurs: " + ", ".join(f"{e} x{c}" for e, c in co))
+            if edges:
+                lines.append("edges: " + ", ".join(
+                    f"--{e['rel']}--> {e['target']}" for e in edges))
+            return "\n".join(lines), False
+        if args.get("relations"):
+            rg = m.relation_graph(project)
+            if not rg:
+                return "no typed relations yet (lessons declare them as they are captured)", False
+            lines = [f"relation graph{(' [' + project + ']') if project else ''}:"]
+            for src, es in rg.items():
+                lines += [f"  {src} --{e['rel']}--> {e['target']} (x{e['notes']})" for e in es]
             return "\n".join(lines), False
         g = m.entity_graph(project)
         if not g:

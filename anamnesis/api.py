@@ -86,9 +86,25 @@ def entity_graph(project: str | None = None, top: int = 30) -> dict:
     return m.entity_graph(project, top)
 
 
+def related_by(entity: str, rel: str | None = None, project: str | None = None,
+               k: int = 20) -> list:
+    """Typed edges declared by lessons about `entity` (Phase 2, relation-aware multi-hop):
+    `[{rel, target, notes}]`, optionally filtered to one `rel` (causes / caused-by / fixes /
+    fixed-by / depends-on / ...). Each `target` is itself an entity, so chain the call to
+    traverse: related_by(related_by('cuda','fixed-by')[0]['target'])."""
+    return m.related_by(entity, rel, project, k)
+
+
+def relation_graph(project: str | None = None, top: int = 30) -> dict:
+    """Per-entity typed-edge overview: `{entity: [{rel, target, notes}]}`, entities ranked
+    by total edge weight. The Phase-2 graph."""
+    return m.relation_graph(project, top)
+
+
 def remember(title: str, *, project: str, type: str = "pattern",
              description: str = "", prevention: str = "", tags=(),
-             supersedes: str = "", entities=(), embed: bool = True) -> str | None:
+             supersedes: str = "", entities=(), relations=None,
+             embed: bool = True) -> str | None:
     """Write one typed memory note and return its stem, or None if it was rejected
     as a prompt-injection payload. `type` ∈ {pattern, mistake, decision}. Embeds
     immediately when the embedder is free (so it is recallable at once); otherwise
@@ -105,7 +121,7 @@ def remember(title: str, *, project: str, type: str = "pattern",
     ent = entities.split(",") if isinstance(entities, str) else list(entities)
     item = {"title": title, "description": description or "",
             "prevention": prevention or "", "supersedes": supersedes or "",
-            "entities": ent}
+            "entities": ent, "relations": list(relations or [])}
     if not m.acquire_lock(timeout_s=60):
         raise RuntimeError("vault busy (lock held by another process) — try again")
     try:
@@ -161,7 +177,8 @@ def remember_lessons(lessons, *, project: str, embed: bool = True) -> list[str]:
             item = {"title": title, "description": ln.get("description") or "",
                     "prevention": ln.get("prevention") or "",
                     "supersedes": ln.get("supersedes") or "",
-                    "entities": ln.get("entities") or []}
+                    "entities": ln.get("entities") or [],
+                    "relations": ln.get("relations") or []}
             stem = m.write_typed_note(m.TYPE_FOLDER[typ], item, proj, date, tag_list, typ)
             if stem:                       # None == rejected (injection-shaped) — skip it
                 written.append(stem)
