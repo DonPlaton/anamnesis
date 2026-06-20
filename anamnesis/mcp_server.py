@@ -68,6 +68,10 @@ TOOLS = [
                 "rerank": {"type": "boolean",
                            "description": "Cloud-judge rerank for higher precision "
                                           "(slower; optional)."},
+                "expand_relations": {"type": "boolean",
+                                     "description": "Also surface lessons reached by the "
+                                                    "hits' typed relation edges (a bug query "
+                                                    "surfaces its fixed-by fix). Optional."},
             },
             "required": ["query"],
         },
@@ -155,10 +159,13 @@ def _tool_memory_search(args: dict) -> tuple[str, bool]:
     if not results:
         return (f"No memory hits for {query!r}"
                 + (f" in {project}" if project else ""), False)   # empty ≠ error
+    if args.get("expand_relations"):                              # Phase 2b graph expansion
+        results = results + m.relation_expand(results, project, max_add=max(1, min(k, 25)))
     lines = [f"{len(results)} hit(s) for {query!r}"
              + (f" [{project}]" if project else "") + f"  ({mode}):"]
     for r in results:
-        head = f"- [{r.get('project')}/{r.get('ntype')}] {r.get('title')}  (score {r['score']})"
+        via = f"  (via {r['via']})" if r.get("via") else ""
+        head = f"- [{r.get('project')}/{r.get('ntype')}] {r.get('title')}  (score {r['score']}){via}"
         body = m._note_snippet(r["stem"], r.get("ntype", "")) or r.get("description", "")
         lines.append(head + (f"\n    {body}" if body else ""))
         lines.append(f"    id: {r['stem']}")

@@ -53,8 +53,11 @@ below is read in context:
    and each target is itself an entity, so multi-hop works (`cuda --fixed-by--> grad-checkpointing
    --requires--> pytorch`); `relation_graph` is the overview. All of it is on every surface: the
    Python API, the CLI (`--entity` / `--entities` / `--relations`), and the `memory_entities` MCP
-   tool. 45 regression tests (`_test_entities.py`). This matches the entity/relation extraction the
-   leaders use, but over markdown with zero new dependency.
+   tool. **Phase 2b:** the edges feed retrieval — `recall(expand_relations=True)` (CLI
+   `--expand-relations`, MCP flag) appends the lessons the hits' edges reach, so a query about a bug
+   surfaces its fix even with no shared words; off by default, each addition tagged with `via`. 52
+   regression tests (`_test_entities.py`). This matches the entity/relation extraction the leaders
+   use, but over markdown with zero new dependency.
 4. **No multi-tenant server / horizontal scale.** An explicit non-goal: local-first files are
    the whole thesis. Multi-machine is already supported (the store is git; `sync.py` mirrors
    it), but a hosted multi-tenant service is out of scope by design.

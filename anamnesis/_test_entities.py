@@ -188,5 +188,24 @@ with tempfile.TemporaryDirectory() as td:
     check("no relations → no relations key (unchanged)", "relations" not in
           m._read_frontmatter_file(m.VAULT / "Patterns" / f"{nr}.md"))
 
+    # ── relation-aware retrieval expansion (Phase 2b) ───────────────────────────
+    print("relation-aware expansion (Phase 2b)")
+    # a first-stage hit on the OOM mistake should pull in its fixed-by fix, which is
+    # lexically unrelated to the query (graph reachability, not similarity).
+    oom_hit = [{"stem": rstem, "ntype": "mistake", "title": "OOM crash in training", "score": 0.7}]
+    exp = m.relation_expand(oom_hit, "rel")
+    check("expansion pulls in the fixed-by lesson via the edge",
+          "Gradient checkpointing trick" in {e["title"] for e in exp})
+    check("every expansion is marked with `via`", exp and all(e.get("via") for e in exp))
+    check("the hit itself is not re-added", rstem not in {e["stem"] for e in exp})
+    filt = m.relation_expand(oom_hit, "rel", rels=["fixed-by"])
+    check("rels filter limits which edge types expand",
+          filt and all(e["via"].startswith("fixed-by") for e in filt))
+    check("max_add bounds the expansion", m.relation_expand(oom_hit, "rel", max_add=0) == [])
+    check("empty hits → []", m.relation_expand([], "rel") == [])
+    import inspect
+    check("api.recall exposes expand_relations (off by default)",
+          inspect.signature(api.recall).parameters["expand_relations"].default is False)
+
 print(f"\n{P} passed, {F} failed")
 sys.exit(1 if F else 0)

@@ -63,6 +63,12 @@ python anamnesis/memory_search.py --relations myproj       # the project's typed
 The MCP `memory_entities` tool exposes all of it to any MCP client. No database, no embedder: the
 graph reads straight from your note frontmatter.
 
+The edges also feed **relation-aware retrieval**: `recall(query, expand_relations=True)` appends the
+lessons the hits' typed edges reach, so a query about a bug surfaces its fix even when the fix shares
+no words with the query. Off by default (plain recall is unchanged); each expansion result carries a
+`via` field naming the edge that pulled it in. From the CLI it is `memory_search.py "query" myproj
+--expand-relations`, and the MCP `memory_search` tool takes an `expand_relations` flag.
+
 ## Generic capture (any agent)
 
 `MemorySession` collects turns and extracts memory once on close. Give any agent a memory in

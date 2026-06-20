@@ -263,8 +263,8 @@ def main():
         return
 
     if not rest:
-        print("usage: memory_search.py <query> [project] [--k=N] [--expand] [--json] [--brief] "
-              "[--rerank] [--xrerank] [--as-of=YYYY-MM-DD] | --entity=X [project] | "
+        print("usage: memory_search.py <query> [project] [--k=N] [--expand] [--expand-relations] "
+              "[--json] [--brief] [--rerank] [--xrerank] [--as-of=YYYY-MM-DD] | --entity=X [project] | "
               "--entities [project] | --relations [project]", file=sys.stderr)
         sys.exit(1)
     query = rest[0]
@@ -288,6 +288,8 @@ def main():
 
     top, mode = search_core(query, project, k, rerank=("--rerank" in flags) or None,
                             xrerank=("--xrerank" in flags) or None)
+    if "--expand-relations" in flags and top:        # Phase 2b: relation-aware expansion
+        top = top + m.relation_expand(top, project, max_add=k)
     if mode == "empty":
         print("(no memory stored yet — see it work with `python examples/demo.py`, or capture "
               "a session, then `python anamnesis/embed_index.py`)", file=sys.stderr)
@@ -310,7 +312,8 @@ def main():
     for r in top:
         nt = r.get("ntype", "")
         title = m._strip_lead_icon(r.get("title") or r.get("stem", ""))
-        print(f"  {r['score']:5.2f} {ICON.get(nt, '·')} [{r.get('project')}] {title}")
+        via = f"  (via {r['via']})" if r.get("via") else ""    # Phase 2b graph-expansion marker
+        print(f"  {r['score']:5.2f} {ICON.get(nt, '·')} [{r.get('project')}] {title}{via}")
         if "--brief" not in flags:
             snip = m._note_snippet(r["stem"], nt, max_chars=300) or r.get("description", "")
             if snip:

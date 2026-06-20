@@ -2995,6 +2995,48 @@ def relation_graph(project: str | None = None, top: int = 30) -> dict:
     return dict(ranked)
 
 
+def relation_expand(hits, project: str | None = None, max_add: int = 5, rels=None) -> list:
+    """Relation-aware retrieval (Phase 2b): given first-stage recall hits (dicts with a
+    `stem`), pull in lessons the query did NOT surface directly but that the graph connects
+    to them. Follows each hit's typed relation edges to their target entities and returns
+    notes about those targets, so a query that hits an OOM mistake also surfaces its
+    `fixed-by` fix. Reads note frontmatter (no embedder), bounded by `max_add`; `rels`
+    optionally limits which relation types expand (e.g. {'fixed-by','fixes'}). Returns
+    recall-shaped dicts tagged with `via` (the edge that pulled them in)."""
+    if not hits:
+        return []
+    rfilter = {x for r in (rels or ()) for x in _norm_entities([r])} or None
+    notes = _iter_project_notes(project) if project else _iter_all_notes()
+    by_stem = {n["stem"]: n for n in notes}
+    idx: dict = {}
+    for n in notes:
+        for e in n.get("entities") or []:
+            idx.setdefault(e, []).append(n)
+    present = {h.get("stem") for h in hits}
+    added, seen_targets = [], set()
+    for h in hits:
+        meta = by_stem.get(h.get("stem"))
+        if not meta:
+            continue
+        for edge in meta.get("relations") or []:
+            t, rel = edge.get("target"), edge.get("rel")
+            if not t or t in seen_targets or (rfilter and rel not in rfilter):
+                continue
+            seen_targets.add(t)
+            for n in idx.get(t, []):
+                if n["stem"] in present or len(added) >= max_add:
+                    continue
+                present.add(n["stem"])
+                added.append({"score": 0.0, "ntype": n["ntype"], "project": n.get("project"),
+                              "title": n["title"], "stem": n["stem"],
+                              "description": n.get("desc", ""),
+                              "prevention": n.get("prevention", ""),
+                              "via": f"{rel} -> {t}", "low_confidence": True})
+            if len(added) >= max_add:
+                return added
+    return added
+
+
 # tags that carry no topical signal in the "stack/themes" line
 _CARD_TAG_STOP = {"context", "session", *TYPED_TYPES}
 

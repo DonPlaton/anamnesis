@@ -29,14 +29,22 @@ import memory_search as _search
 
 
 def recall(query: str, project: str | None = None, k: int = 5,
-           *, rerank: bool = False) -> list[dict]:
-    """Rank memory notes for `query`. Returns a list (≤ k) of dicts with keys:
+           *, rerank: bool = False, expand_relations: bool = False,
+           max_expand: int = 5) -> list[dict]:
+    """Rank memory notes for `query`. Returns a list of dicts with keys:
     `score, ntype, project, title, stem, description, prevention`. Empty list when
     nothing is embedded or matches. Semantic (embedding cosine) with a GPU-free
-    lexical fallback when Ollama is busy; `rerank=True` adds an opt-in cloud rerank."""
+    lexical fallback when Ollama is busy; `rerank=True` adds an opt-in cloud rerank.
+
+    `expand_relations=True` is relation-aware retrieval (Phase 2b): after the direct
+    hits, it appends up to `max_expand` graph-connected lessons reached by the hits'
+    typed relation edges (a query about a bug also surfaces its fixed-by fix), each
+    tagged with `via`. Off by default, so plain recall is unchanged."""
     if not query or not query.strip():
         return []
     results, _mode = _search.search_core(query, project, k, rerank=rerank)
+    if expand_relations and results:
+        results = results + m.relation_expand(results, project, max_add=max_expand)
     return results
 
 
