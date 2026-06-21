@@ -322,6 +322,11 @@ RETRIEVAL_RESOLVED_WEIGHT = float(os.environ.get("ANAMNESIS_RESOLVED_WEIGHT", "0
 # a low-confidence lesson is gently down-weighted in recall, floored so it's never
 # buried; a note without confidence is treated as fully confident (neutral).
 RETRIEVAL_CONF_FLOOR = float(os.environ.get("ANAMNESIS_CONF_FLOOR", "0.6"))
+# Salience nudge (Brain F5): a note central to the knowledge graph (its entities referenced by
+# the rest of the store) gets a gentle recall boost — recurrence generalised to centrality. The
+# score is stamped sleep-time by consolidation; UNSTAMPED notes read 0 → ×1.0, so this is INERT
+# on an entity-less/benchmark corpus and never moves the calibrated ranking there. Max +SALIENCE_BOOST.
+RETRIEVAL_SALIENCE_BOOST = float(os.environ.get("ANAMNESIS_SALIENCE_BOOST", "0.1"))
 # Graph multi-hop expansion (M-6): after ranking, pull in notes linked from the
 # top hits (RESOLVES/SUPERSEDES/[[wikilinks]]) so "A→B→C" chains are reachable.
 # 0 = off (keeps injection lean); set ANAMNESIS_GRAPH_HOPS=1 to enable by default.
@@ -2925,7 +2930,18 @@ def _note_meta(p: Path, ntype: str, parsed: dict) -> dict | None:
             "tags": _norm_tags(raw_tags), "resolved": resolved, "recurrence": rec,
             "entities": _norm_entities(fm.get("entities")),
             "relations": _norm_relations(fm.get("relations")),
-            "entity_types": _norm_entity_types(fm.get("entity_types"), gate=False)}
+            "entity_types": _norm_entity_types(fm.get("entity_types"), gate=False),
+            "salience": _coerce_salience(fm.get("salience"))}
+
+
+def _coerce_salience(v) -> float:
+    """A stamped salience (Brain F5) clamped to [0,1]; 0.0 when absent/garbage so an unstamped
+    note is neutral in ranking — the boost is inert until consolidation scores the graph."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if f != f else max(0.0, min(1.0, f))   # NaN-safe clamp
 
 
 def _note_meta_for_stem(stem: str) -> dict | None:
@@ -3032,6 +3048,7 @@ entity_index = _graph.entity_index
 entity_types_index = _graph.entity_types_index     # Brain layer (F1): entity -> type
 entities_by_type = _graph.entities_by_type
 entity_timeline = _graph.entity_timeline           # Brain layer (F3): live+superseded history
+salience_index = _graph.salience_index             # Brain layer (F5): graph-centrality salience
 _edge_counts = _graph._edge_counts
 _edges_sorted = _graph._edges_sorted
 notes_for_entity = _graph.notes_for_entity
@@ -3859,6 +3876,9 @@ def _salience_mult(stem: str, rec: dict) -> float:
         c = _coerce_confidence(rec.get("confidence"))
         if c is not None:
             mult *= RETRIEVAL_CONF_FLOOR + (1.0 - RETRIEVAL_CONF_FLOOR) * c
+        sal = rec.get("salience")        # Brain F5: gentle centrality boost, inert when unstamped (0)
+        if sal and RETRIEVAL_SALIENCE_BOOST > 0:
+            mult *= 1.0 + RETRIEVAL_SALIENCE_BOOST * max(0.0, min(1.0, _coerce_salience(sal)))
     return mult
 
 

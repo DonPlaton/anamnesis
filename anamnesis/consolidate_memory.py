@@ -337,10 +337,12 @@ def cap_project_notes(cache: dict, apply: bool) -> int:
         if len(items) <= MAX_LIVE_PER_PROJECT:
             continue
         rec_of = dict(items)
-        def _util(stem, _r=rec_of):                  # query-independent value (1A frequency prior)
+        sal = m.salience_index()                     # F5: graph centrality, generalises recurrence
+        def _util(stem, _r=rec_of, _s=sal):          # query-independent value (1A frequency prior)
             r = _r[stem]
             n = int(r.get("recurrence", 1) or 1)
-            return n * (m.RETRIEVAL_RESOLVED_WEIGHT if r.get("resolved") else 1.0)
+            base = n * (m.RETRIEVAL_RESOLVED_WEIGHT if r.get("resolved") else 1.0)
+            return base * (1.0 + _s.get(stem, 0.0))  # a graph-central note is kept over a peripheral one
         def _toks(stem, _r=rec_of):
             r = _r[stem]
             return m._tokens(f"{r.get('title','')} {r.get('desc','')} {r.get('prevention','')} {stem}")
@@ -364,6 +366,44 @@ def cap_project_notes(cache: dict, apply: bool) -> int:
             cache.pop(stem, None)
             archived += 1
     return archived
+
+
+def stamp_salience(apply: bool) -> int:
+    """Brain F5: score every note's graph SALIENCE (centrality blended with the recurrence prior)
+    and stamp it into frontmatter, so retrieval applies the gentle centrality nudge and the
+    coreset/cards can prefer central notes. Sleep-time, GPU-free, idempotent (writes only on a
+    meaningful change). Returns the count (re)stamped. Inert on an entity-less store (salience {})."""
+    sal = m.salience_index()                   # {stem: [0,1]}; {} → nothing central → no-op
+    if not sal:
+        return 0
+    stamped = 0
+    for ntype, folder in m.TYPE_FOLDER.items():
+        d = m.VAULT / folder
+        if not d.exists():
+            continue
+        for p in d.glob("*.md"):
+            s = sal.get(p.stem)
+            if s is None:
+                continue
+            new = round(s, 3)
+            cur = m._read_frontmatter_file(p).get("salience")
+            try:
+                if cur is not None and abs(float(cur) - new) < 1e-3:
+                    continue                   # unchanged → skip (no churn)
+            except (TypeError, ValueError):
+                pass
+            if new <= 0 and cur is None:
+                continue                       # don't stamp a 0 onto a peripheral note
+            if not apply:
+                stamped += 1
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+                m.write_atomic(p, m._stamp_frontmatter(text, {"salience": new}))
+                stamped += 1
+            except OSError:
+                pass
+    return stamped
 
 
 def main():
@@ -470,6 +510,13 @@ def _run_consolidation(apply, mode, has_llm):
     linked = link_related_notes(m.load_embed_cache() if apply else cache, apply)
     print(f"[consolidate] reflection: {distilled} pattern(s) distilled, "
           f"{linked} note(s) auto-linked ({'applied' if apply else 'dry-run'})")
+
+    # 4b) salience scoring (Brain F5): stamp graph-centrality salience BEFORE the index rebuild
+    #     so retrieval reads the fresh nudge. GPU-free; inert on an entity-less store.
+    salstamp = stamp_salience(apply)
+    if salstamp:
+        print(f"[consolidate] salience: {salstamp} note(s) "
+              f"{'stamped' if apply else 'would be stamped'} (graph centrality)")
 
     if apply:
         m.rebuild_index()    # Index.md is itself OKF-valid now (type: index — audit H1/M-14)

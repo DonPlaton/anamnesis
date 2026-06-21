@@ -19,6 +19,7 @@ memory_hook in either order is safe despite the re-export cycle, and a test that
     graph_export                                                    — visualization (mermaid/dot/json)
 """
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -122,6 +123,39 @@ def entity_timeline(entity: str, project: str | None = None, sup: dict | None = 
     return {"entity": ent, "first_seen": dates[0] if dates else "",
             "last_seen": dates[-1] if dates else "", "count": len(rows),
             "mentions": rows, "evolution": evolution}
+
+
+def salience_index(project: str | None = None) -> dict:
+    """stem -> salience in [0,1]: graph CENTRALITY blended with the recurrence prior (Brain F5).
+    A note is salient when its entities are referenced by the rest of the store (inbound relation
+    edges + co-occurrence degree) OR when it recurs across sessions — generalising recurrence
+    (seen often) to centrality (referenced often). Max-scaled across the corpus, so an entity-less
+    / flat store → all 0 (INERT, e.g. on a benchmark). Computed sleep-time, stamped by
+    consolidation, read as a gentle ranking nudge. No embedder, no LLM."""
+    mh = _m()
+    notes = mh._iter_project_notes(project) if project else mh._iter_all_notes()
+    if not notes:
+        return {}
+    ent_notes: dict = {}        # how many notes carry each entity (degree source)
+    inbound: dict = {}          # how many relation edges TARGET each entity (inbound references)
+    for n in notes:
+        for e in n.get("entities") or []:
+            ent_notes[e] = ent_notes.get(e, 0) + 1
+        for ed in n.get("relations") or []:
+            t = ed.get("target")
+            if t:
+                inbound[t] = inbound.get(t, 0) + 1
+    raw: dict = {}
+    for n in notes:
+        ents = n.get("entities") or []
+        deg = sum(max(0, ent_notes.get(e, 1) - 1) for e in ents)   # co-occurrence centrality
+        inb = sum(inbound.get(e, 0) for e in ents)                 # inbound reference count
+        rec = max(1, int(n.get("recurrence", 1) or 1))
+        raw[n["stem"]] = math.log1p(inb) + 0.5 * math.log1p(deg) + math.log1p(rec - 1)
+    hi = max(raw.values(), default=0.0)
+    if hi <= 0:                  # no centrality and no recurrence anywhere → inert
+        return {s: 0.0 for s in raw}
+    return {s: round(v / hi, 4) for s, v in raw.items()}
 
 
 def _edge_counts(notes, exclude=None, rel=None) -> dict:

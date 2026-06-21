@@ -34,7 +34,7 @@ SIM_FLOOR = m.RETRIEVAL_NEAR_FLOOR   # shared nearest-neighbour floor, not a pri
 # columns selected for ranking candidates — kept in one place so the SQL and the
 # row→record mapping never drift apart
 _CAND_COLS = ("stem", "project", "ntype", "title", "descr", "prevention",
-              "recurrence", "resolved", "confidence", "vec")
+              "recurrence", "resolved", "confidence", "salience", "vec")
 
 
 def db_path() -> Path:
@@ -120,13 +120,18 @@ def _conf(r: dict):
     return c
 
 
-def _row(stem: str, r: dict) -> tuple:
-    """A note record → a `notes` table row (column order = the CREATE below)."""
+def _row(stem: str, r: dict, salience: float = 0.0) -> tuple:
+    """A note record → a `notes` table row (column order = the CREATE below). `salience`
+    (Brain F5) is sourced from frontmatter at build time, 0 for a fresh/unstamped note."""
     vec = r.get("vec") or []
+    try:
+        sal = max(0.0, min(1.0, float(r.get("salience", salience) or salience)))
+    except (TypeError, ValueError):
+        sal = float(salience or 0.0)
     return (stem, r.get("project"), r.get("ntype"), r.get("title"),
             r.get("desc", ""), r.get("prevention", ""),
             int(r.get("recurrence", 1) or 1),
-            1 if r.get("resolved") else 0, _conf(r),
+            1 if r.get("resolved") else 0, _conf(r), sal,
             len(vec), _pack(vec))
 
 
@@ -139,7 +144,11 @@ def _create_schema(con: sqlite3.Connection) -> bool:
     cur.execute("""CREATE TABLE IF NOT EXISTS notes(
         stem TEXT PRIMARY KEY, project TEXT, ntype TEXT, title TEXT,
         descr TEXT, prevention TEXT, recurrence INTEGER, resolved INTEGER,
-        confidence REAL, dim INTEGER, vec BLOB)""")
+        confidence REAL, salience REAL, dim INTEGER, vec BLOB)""")
+    try:
+        cur.execute("ALTER TABLE notes ADD COLUMN salience REAL")   # migrate a pre-F5 index in place
+    except sqlite3.OperationalError:
+        pass                                                        # column already present
     cur.execute("CREATE INDEX IF NOT EXISTS idx_notes_project ON notes(project)")
     cur.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
     fts = _fts_ok(con)
@@ -203,6 +212,12 @@ def build(verbose: bool = False) -> int:
         if fts:
             cur.execute("DELETE FROM notes_fts")
         cur.execute("DELETE FROM meta")
+        # Brain F5: salience lives in note frontmatter (stamped sleep-time), not the embed cache,
+        # so source it from the markdown here. One scan; {} → every row salience 0 (inert).
+        try:
+            sal_map = {nt["stem"]: nt.get("salience", 0.0) for nt in m._iter_all_notes()}
+        except Exception:
+            sal_map = {}
         n = dim = 0
         for stem, r in cache.items():
             if not isinstance(r, dict):
@@ -213,14 +228,14 @@ def build(verbose: bool = False) -> int:
             try:
                 # vec=None → empty blob / dim 0: a text-only entry, FTS-indexed for
                 # lexical recall but skipped by the semantic scan (no-embedder, #32)
-                row = _row(stem, r)
+                row = _row(stem, r, sal_map.get(stem, 0.0))
             except (TypeError, ValueError, OverflowError, struct.error):
                 continue        # poisoned vector (bad type / out of range) — drop the row
-            cur.execute(f"INSERT OR REPLACE INTO notes VALUES ({','.join('?' * 11)})", row)
+            cur.execute(f"INSERT OR REPLACE INTO notes VALUES ({','.join('?' * 12)})", row)
             if fts:
                 cur.execute("INSERT INTO notes_fts (stem, text) VALUES (?, ?)",
                             (stem, _fts_text(r, stem)))
-            dim = dim or row[9]
+            dim = dim or row[10]      # dim moved to index 10 after salience was inserted at 9 (F5)
             n += 1
         model = (m.load_embed_meta() or {}).get("model") or m.embed_signature()
         cur.execute("INSERT OR REPLACE INTO meta VALUES ('model', ?)", (str(model),))
@@ -258,7 +273,7 @@ def upsert(records: dict) -> int:
                 continue        # poisoned/out-of-range vector — skip the row, not the
                                 # whole batch (mirror build()'s A10 guard; P3 struct.pack
                                 # raises OverflowError where the old array('f') never did)
-            cur.execute(f"INSERT OR REPLACE INTO notes VALUES ({','.join('?' * 11)})", row)
+            cur.execute(f"INSERT OR REPLACE INTO notes VALUES ({','.join('?' * 12)})", row)
             if fts:
                 cur.execute("DELETE FROM notes_fts WHERE stem = ?", (stem,))
                 cur.execute("INSERT INTO notes_fts (stem, text) VALUES (?, ?)",
@@ -502,12 +517,14 @@ def _rows_to_cands(rows) -> list:
     """Rows in `_CAND_COLS` order → [(stem, record)] shaped like embed-cache entries
     so the retrieval ranker is identical to the JSON path."""
     out = []
-    for (stem, proj, nt, title, descr, prev, rec, resolved, conf, vec) in rows:
+    for (stem, proj, nt, title, descr, prev, rec, resolved, conf, salience, vec) in rows:
         r = {"vec": _unpack(vec), "ntype": nt, "project": proj, "title": title,
              "desc": descr or "", "prevention": prev or "",
              "recurrence": rec or 1, "resolved": bool(resolved)}
         if conf is not None:
             r["confidence"] = conf
+        if salience:
+            r["salience"] = salience          # Brain F5: read back as the ranking nudge
         out.append((stem, r))
     return out
 

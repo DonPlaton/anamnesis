@@ -249,5 +249,57 @@ with tempfile.TemporaryDirectory() as td:
           tl2.get("evolution") == [] and tl2.get("count") == 1)
     check("unknown entity → empty timeline", m.entity_timeline("nonexistent-zzz") == {})
 
+# ── F5: salience (graph centrality, sleep-time) ──────────────────────────────────
+print("salience (F5)")
+import consolidate_memory as cm     # noqa: E402
+import index_sqlite as sxi          # noqa: E402
+with tempfile.TemporaryDirectory() as td:
+    m.VAULT = Path(td)
+    set_profile("research")
+    a = m.write_typed_note("Patterns", {"title": "Hub method note", "entities": ["hub", "x"],
+        "entity_types": {"hub": "method"}}, "proj", "2026-06-01", [], "pattern")
+    m.write_typed_note("Mistakes", {"title": "B refs hub", "entities": ["b"],
+        "relations": [{"rel": "uses", "target": "hub"}]}, "proj", "2026-06-02", [], "mistake")
+    m.write_typed_note("Mistakes", {"title": "C refs hub", "entities": ["c"],
+        "relations": [{"rel": "uses", "target": "hub"}]}, "proj", "2026-06-03", [], "mistake")
+    d = m.write_typed_note("Patterns", {"title": "Lonely note", "entities": ["lonely"]},
+        "proj", "2026-06-04", [], "pattern")
+
+    sal = m.salience_index()
+    check("central note (entity referenced by 2 edges) is most salient", sal.get(a) == 1.0)
+    check("isolated note has 0 salience", sal.get(d) == 0.0)
+
+    n = cm.stamp_salience(apply=True)
+    check("stamp_salience stamps the central note", n >= 1)
+    afm = m._read_frontmatter_file(m.VAULT / "Patterns" / f"{a}.md")
+    check("central note got a salience stamp > 0.5", afm.get("salience") and float(afm["salience"]) > 0.5)
+    dfm = m._read_frontmatter_file(m.VAULT / "Patterns" / f"{d}.md")
+    check("peripheral note NOT stamped (kept clean)", dfm.get("salience") is None)
+    check("stamp_salience is idempotent (no re-stamp)", cm.stamp_salience(apply=True) == 0)
+
+    base = m._salience_mult(a, {"recurrence": 1})
+    check("_salience_mult boosts a salient note above neutral",
+          m._salience_mult(a, {"recurrence": 1, "salience": 1.0}) > base)
+    check("_salience_mult inert when salience absent/0",
+          m._salience_mult(a, {"recurrence": 1, "salience": 0}) == base)
+
+    # SQLite carries the stamped salience into the ranking candidates
+    m.save_embed_cache({a: {"ntype": "pattern", "project": "proj", "title": "Hub method note",
+                            "desc": "", "prevention": ""}})
+    sxi.build()
+    cands = dict(sxi.iter_candidates("proj"))
+    check("SQLite candidate carries the stamped salience", cands.get(a, {}).get("salience", 0) > 0.5)
+
+# ── F5: inert on an entity-less / benchmark-like store ───────────────────────────
+print("salience inert on a flat store")
+with tempfile.TemporaryDirectory() as td:
+    m.VAULT = Path(td)
+    set_profile("coding")
+    m.write_typed_note("Patterns", {"title": "plain note", "description": "no entities"},
+                       "p", "2026-06-01", [], "pattern")
+    check("entity-less store → salience all 0 (inert)",
+          all(v == 0 for v in m.salience_index().values()))
+    check("stamp_salience is a no-op on a flat store", cm.stamp_salience(apply=True) == 0)
+
 print(f"\n{P} passed, {F} failed")
 sys.exit(1 if F else 0)
