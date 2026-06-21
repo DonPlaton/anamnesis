@@ -369,10 +369,11 @@ def cap_project_notes(cache: dict, apply: bool) -> int:
 
 
 def stamp_salience(apply: bool) -> int:
-    """Brain F5: score every note's graph SALIENCE (centrality blended with the recurrence prior)
-    and stamp it into frontmatter, so retrieval applies the gentle centrality nudge and the
-    coreset/cards can prefer central notes. Sleep-time, GPU-free, idempotent (writes only on a
-    meaningful change). Returns the count (re)stamped. Inert on an entity-less store (salience {})."""
+    """Brain F5: score every note's graph SALIENCE (pure centrality — inbound edges + degree;
+    recurrence is applied separately by the ranker) and stamp it into frontmatter, so retrieval
+    applies the gentle centrality nudge and the coreset/cards can prefer central notes. Sleep-time,
+    GPU-free, idempotent (writes only on a meaningful change). Returns the count (re)stamped. Inert
+    on an entity-less store (salience {})."""
     sal = m.salience_index()                   # {stem: [0,1]}; {} → nothing central → no-op
     if not sal:
         return 0
