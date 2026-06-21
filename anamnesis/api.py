@@ -133,6 +133,14 @@ def entities_by_type(etype: str, project: str | None = None) -> list:
     return m.entities_by_type(etype, project)
 
 
+def entity_timeline(entity: str, project: str | None = None) -> dict:
+    """The chronological history of an entity across LIVE and SUPERSEDED notes (Brain F3):
+    `{entity, first_seen, last_seen, count, mentions, evolution}`. `evolution` lists the points
+    where an earlier take was superseded — how the understanding of the entity changed over time.
+    Pull-only — surfaced in the entity card and here, never injected. `{}` for an unknown entity."""
+    return m.entity_timeline(entity, project)
+
+
 def remember(title: str, *, project: str, type: str = "pattern",
              description: str = "", prevention: str = "", tags=(),
              supersedes: str = "", entities=(), relations=None,

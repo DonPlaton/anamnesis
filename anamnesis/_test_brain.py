@@ -207,5 +207,47 @@ with tempfile.TemporaryDirectory() as td:
     check("write_entity_card is a no-op under coding", m.write_entity_card("gears", "method") == "")
     check("no Entities/ folder created under coding", not (m.VAULT / "Entities").exists())
 
+# ── F3: temporal / evolution ─────────────────────────────────────────────────────
+print("temporal / evolution (F3)")
+with tempfile.TemporaryDirectory() as td:
+    m.VAULT = Path(td)
+    set_profile("research")
+    m.write_typed_note("Decisions",
+        {"title": "Use RNN for sequence model", "description": "rnn baseline",
+         "entities": ["seqmodel"], "entity_types": {"seqmodel": "method"}},
+        "proj", "2026-05-01", [], "decision")
+    m.write_typed_note("Decisions",                          # later take SUPERSEDES the RNN one
+        {"title": "Switch to Transformer for sequence model", "description": "attention wins",
+         "entities": ["seqmodel"], "entity_types": {"seqmodel": "method"},
+         "supersedes": "Use RNN for sequence model"},
+        "proj", "2026-06-10", [], "decision")
+    m.write_typed_note("Patterns",                           # a plain later mention
+        {"title": "Transformer scaling law", "entities": ["seqmodel"],
+         "entity_types": {"seqmodel": "method"}}, "proj", "2026-06-15", [], "pattern")
+
+    check("the RNN take was retired to Superseded/",
+          (m.VAULT / "Decisions" / "Superseded").exists())
+    tl = m.entity_timeline("seqmodel")
+    check("timeline spans live + superseded (3 mentions)", tl.get("count") == 3)
+    check("first_seen is the EARLIEST incl. superseded", tl.get("first_seen") == "2026-05-01")
+    check("last_seen is the latest", tl.get("last_seen") == "2026-06-15")
+    evo = tl.get("evolution", [])
+    check("evolution captures the superseded take", len(evo) == 1 and "RNN" in evo[0]["title"])
+    check("evolution points to the successor",
+          evo[0]["superseded_by"].endswith("switch-to-transformer-for-sequence-model"))
+
+    m.refresh_entity_cards()
+    card = (m.VAULT / "Entities" / "method-seqmodel.md").read_text(encoding="utf-8")
+    check("card surfaces the evolution section", "Эволюция понимания" in card and "RNN" in card)
+    check("card span counts the full history", "2026-05-01" in card and "упоминаний: 3" in card)
+    check("api.entity_timeline works", api.entity_timeline("seqmodel").get("count") == 3)
+
+    m.write_typed_note("Patterns", {"title": "Adam optimizer", "entities": ["adam"],
+        "entity_types": {"adam": "method"}}, "proj", "2026-06-01", [], "pattern")
+    tl2 = m.entity_timeline("adam")
+    check("no-supersession entity → empty evolution, count 1",
+          tl2.get("evolution") == [] and tl2.get("count") == 1)
+    check("unknown entity → empty timeline", m.entity_timeline("nonexistent-zzz") == {})
+
 print(f"\n{P} passed, {F} failed")
 sys.exit(1 if F else 0)

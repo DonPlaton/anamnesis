@@ -95,6 +95,35 @@ def entities_by_type(etype: str, project: str | None = None) -> list:
     return sorted(e for e, t in entity_types_index(project).items() if t == et)
 
 
+def entity_timeline(entity: str, project: str | None = None, sup: dict | None = None) -> dict:
+    """The chronological history of an entity across LIVE and SUPERSEDED notes (Brain layer, F3):
+    first/last seen, the dated mentions, and the EVOLUTION events — where an earlier note about it
+    was later superseded, i.e. the take changed. Reads the Superseded/ folders too, so it shows
+    history that live recall hides; `sup` reuses a pre-built superseded index across a card refresh.
+    Pull-only — surfaced in the entity card and via api.entity_timeline, never injected. Returns
+    {entity, first_seen, last_seen, count, mentions:[...], evolution:[...]} or {} for an unknown one."""
+    mh = _m()
+    norm = mh._norm_entities([entity])
+    if not norm:
+        return {}
+    ent = norm[0]
+    live = notes_for_entity(ent, project, k=1000)
+    dead = (sup if sup is not None else mh._superseded_index(project)).get(ent, [])
+    notes = live + dead
+    if not notes:
+        return {}
+    rows = sorted(({"date": n.get("date", ""), "title": n.get("title", ""),
+                    "stem": n.get("stem", ""), "ntype": n.get("ntype", ""),
+                    "status": n.get("status", "live"),
+                    "superseded_by": n.get("superseded_by", "")} for n in notes),
+                  key=lambda r: r["date"])
+    dates = [r["date"] for r in rows if r["date"]]
+    evolution = [r for r in rows if r["status"] == "superseded" and r["superseded_by"]]
+    return {"entity": ent, "first_seen": dates[0] if dates else "",
+            "last_seen": dates[-1] if dates else "", "count": len(rows),
+            "mentions": rows, "evolution": evolution}
+
+
 def _edge_counts(notes, exclude=None, rel=None) -> dict:
     """{(rel, target): count} over the notes' typed relations, skipping self-edges (target
     == `exclude`) and, when `rel` is given, other relation types. One source for the edge

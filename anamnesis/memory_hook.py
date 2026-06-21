@@ -2241,15 +2241,22 @@ def sync_scale_index(records: dict | None = None, delete: list | None = None) ->
     if not idx:
         return
     try:
-        meta = idx.index_meta() if idx.index_exists() else None
-        if meta is None or meta.get("vec_format") != idx.VEC_FORMAT:
-            idx.build()        # absent or stale pack format → full rebuild from the cache
-            return
-        if records:
-            idx.upsert(records)
-            idx.upsert_graph(list(records))   # F4: keep the entity/relation graph rows current
-        if delete:
-            idx.delete(delete)                # delete() prunes the graph rows too (F4)
+        if idx.index_exists():
+            meta = idx.index_meta()
+            if meta is None or meta.get("vec_format") != idx.VEC_FORMAT:
+                idx.build()        # present but stale/unstamped pack format → full rebuild
+                return
+            if records:
+                idx.upsert(records)
+                idx.upsert_graph(list(records))   # F4: keep the entity/relation graph rows current
+            if delete:
+                idx.delete(delete)                # delete() prunes the graph rows too (F4)
+        elif records:
+            # No index yet → build it, but ONLY when there is content to add. A bare delete has
+            # nothing to prune from a non-existent index, and a build triggered mid-write (e.g. a
+            # supersede firing before its replacement note is on disk) would snapshot a partial
+            # store and leave a stale graph index live. The next note write builds it complete.
+            idx.build()
     except Exception as e:
         log(f"scale-index sync skipped: {e}")
 
@@ -2940,6 +2947,40 @@ def _note_meta_for_stem(stem: str) -> dict | None:
     return meta
 
 
+def _iter_superseded_notes(project: str | None = None) -> list[dict]:
+    """Superseded notes (retired to <folder>/Superseded/) as metas carrying status +
+    superseded_by — the history live recall hides, for the F3 entity timeline. O(superseded)
+    scan; superseded notes are a small minority, and this runs only on the pull-only path."""
+    out = []
+    for ntype, folder in TYPE_FOLDER.items():
+        d = VAULT / folder / "Superseded"
+        if not d.exists():
+            continue
+        for p in d.glob("*.md"):
+            parsed = parse_typed_stem(p.stem)
+            if not parsed or (project and parsed["project"] != project):
+                continue
+            meta = _note_meta(p, ntype, parsed)
+            if not meta:
+                continue
+            fm = _read_frontmatter_file(p)
+            meta["status"] = "superseded"
+            meta["superseded_by"] = str(fm.get("superseded_by") or "")
+            meta.setdefault("project", parsed["project"])
+            out.append(meta)
+    return out
+
+
+def _superseded_index(project: str | None = None) -> dict:
+    """entity -> [superseded note metas], one scan — shared across an entity-card refresh so a
+    bulk pass reads the Superseded/ folders once, not once per entity (F3)."""
+    idx: dict = {}
+    for n in _iter_superseded_notes(project):
+        for e in n.get("entities") or []:
+            idx.setdefault(e, []).append(n)
+    return idx
+
+
 def _iter_project_notes(project: str) -> list[dict]:
     """All live (non-archived, non-superseded) typed notes for a project, as
     metadata dicts. Flat glob → Superseded/ and Archive/ subdirs are skipped."""
@@ -2990,6 +3031,7 @@ except ImportError:
 entity_index = _graph.entity_index
 entity_types_index = _graph.entity_types_index     # Brain layer (F1): entity -> type
 entities_by_type = _graph.entities_by_type
+entity_timeline = _graph.entity_timeline           # Brain layer (F3): live+superseded history
 _edge_counts = _graph._edge_counts
 _edges_sorted = _graph._edges_sorted
 notes_for_entity = _graph.notes_for_entity
@@ -3144,12 +3186,14 @@ def _entity_card_stem(entity: str, etype: str) -> str:
     return f"{t}-{e[0]}" if e else ""
 
 
-def build_entity_card(entity: str, etype: str | None = None, idx: dict | None = None) -> str:
+def build_entity_card(entity: str, etype: str | None = None, idx: dict | None = None,
+                      sup: dict | None = None) -> str:
     """Distil every live note tagged with `entity` (across ALL projects) into a standalone
-    markdown card: type · where-used · typed neighbours · co-occurring entities · lessons
-    grouped by kind, with a first/last-seen line. Deterministic structural rollup — no LLM, no
-    embedder. Returns the full file text (frontmatter + body), or '' when nothing references it.
-    `idx` reuses a pre-built entity_index so a full refresh scans the vault once, not 3× a card."""
+    markdown card: type · where-used · typed neighbours · co-occurring entities · lessons grouped
+    by kind, a first/last-seen line, and (F3) the EVOLUTION of the take — where an earlier note was
+    later superseded. Deterministic structural rollup — no LLM, no embedder. Returns the full file
+    text (frontmatter + body), or '' when nothing references it. `idx` reuses a pre-built
+    entity_index and `sup` a pre-built superseded index, so a full refresh scans the vault once."""
     norm = _norm_entities([entity])
     if not norm:
         return ""
@@ -3162,8 +3206,9 @@ def build_entity_card(entity: str, etype: str | None = None, idx: dict | None = 
         return ""
     etype = etype or entity_types_index().get(ent, "entity")
     projects = sorted({n.get("project") for n in notes if n.get("project")})
-    dates = sorted(n["date"] for n in notes if n.get("date"))
-    first_seen, last_seen = (dates[0], dates[-1]) if dates else ("", "")
+    tl = entity_timeline(ent, None, sup=sup)              # F3: spans live + superseded history
+    first_seen, last_seen = tl.get("first_seen", ""), tl.get("last_seen", "")
+    evo = tl.get("evolution", [])
     edges = related_by(ent, project=None, k=8, idx=idx)            # typed neighbours
     cooc = [e for e, _ in co_occurring(ent, None, k=8, idx=idx) if e != ent]
 
@@ -3185,15 +3230,24 @@ def build_entity_card(entity: str, etype: str | None = None, idx: dict | None = 
     if rel_bits:
         lines.append("**Связано:** " + "  ·  ".join(rel_bits))
     if first_seen:
-        lines.append(f"_Впервые: {first_seen} · последний раз: {last_seen}_")
+        span = f"_Впервые: {first_seen} · последний раз: {last_seen}"
+        span += f" · упоминаний: {tl.get('count', len(notes))}_" if tl else "_"
+        lines.append(span)
     for kind, label in (("mistake", "**⚠️ Грабли:**"), ("pattern", "**✅ Паттерны:**"),
                         ("decision", "**🎯 Решения:**")):
         if by_type[kind]:
             lines += ["", label] + [_card_item(n) for n in by_type[kind][:CARD_MAX_ITEMS]]
+    if evo:                                              # F3: how the understanding changed
+        lines += ["", "**🕓 Эволюция понимания:**"]
+        for r in evo[-CARD_MAX_ITEMS:]:
+            nd = (parse_typed_stem(r.get("superseded_by", "")) or {}).get("date", "")
+            arrow = f" → пересмотрено {nd}" if nd else " → пересмотрено позже"
+            lines.append(f"- {r.get('date', '')}: «{_one_line(r.get('title', ''), 70)}»{arrow}")
     return fm_block(fm) + "\n" + "\n".join(lines) + "\n"
 
 
-def write_entity_card(entity: str, etype: str | None = None, idx: dict | None = None) -> str:
+def write_entity_card(entity: str, etype: str | None = None, idx: dict | None = None,
+                      sup: dict | None = None) -> str:
     """(Re)generate ONE entity card under Entities/ and write it atomically, only on change.
     Returns the stem when a card was actually WRITTEN, or '' when there was nothing to write —
     unchanged (idempotent no-op), no notes, junk entity, or no brain profile active. The 'only
@@ -3205,7 +3259,7 @@ def write_entity_card(entity: str, etype: str | None = None, idx: dict | None = 
         return ""
     etype = etype or entity_types_index().get(norm[0], "entity")
     stem = _entity_card_stem(norm[0], etype)
-    card = build_entity_card(norm[0], etype, idx=idx)
+    card = build_entity_card(norm[0], etype, idx=idx, sup=sup)
     if not stem or not card:
         return ""
     d = VAULT / ENTITIES_FOLDER
@@ -3234,6 +3288,7 @@ def refresh_entity_cards(entities: list | None = None) -> int:
         return 0
     _sx = _scale_index()
     idx = None if (_sx and _sx.graph_index_ready()) else entity_index(None)
+    sup = _superseded_index()                # F3: scan Superseded/ once, shared across all cards
     if entities is None:
         targets = list(type_idx.items())
     else:
@@ -3242,7 +3297,7 @@ def refresh_entity_cards(entities: list | None = None) -> int:
     n = 0
     for ent, etype in targets:
         try:
-            if write_entity_card(ent, etype, idx=idx):
+            if write_entity_card(ent, etype, idx=idx, sup=sup):
                 n += 1
         except Exception as exc:                           # one bad card must not abort the pass
             log(f"Entity card error for {ent}: {exc}")
