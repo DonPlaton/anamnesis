@@ -2247,8 +2247,9 @@ def sync_scale_index(records: dict | None = None, delete: list | None = None) ->
             return
         if records:
             idx.upsert(records)
+            idx.upsert_graph(list(records))   # F4: keep the entity/relation graph rows current
         if delete:
-            idx.delete(delete)
+            idx.delete(delete)                # delete() prunes the graph rows too (F4)
     except Exception as e:
         log(f"scale-index sync skipped: {e}")
 
@@ -2920,6 +2921,25 @@ def _note_meta(p: Path, ntype: str, parsed: dict) -> dict | None:
             "entity_types": _norm_entity_types(fm.get("entity_types"), gate=False)}
 
 
+def _note_meta_for_stem(stem: str) -> dict | None:
+    """Note meta for a bare stem — the SQLite graph upsert (F4) reads only the touched files
+    by stem. None if the stem is unparseable or its live file is gone (superseded/archived →
+    the caller just drops the graph rows for it)."""
+    parsed = parse_typed_stem(stem)
+    if not parsed:
+        return None
+    folder = TYPE_FOLDER.get(parsed["ntype"])
+    if not folder:
+        return None
+    p = VAULT / folder / f"{stem}.md"
+    if not p.exists():
+        return None
+    meta = _note_meta(p, parsed["ntype"], parsed)
+    if meta:
+        meta.setdefault("project", parsed["project"])
+    return meta
+
+
 def _iter_project_notes(project: str) -> list[dict]:
     """All live (non-archived, non-superseded) typed notes for a project, as
     metadata dicts. Flat glob → Superseded/ and Archive/ subdirs are skipped."""
@@ -3134,8 +3154,10 @@ def build_entity_card(entity: str, etype: str | None = None, idx: dict | None = 
     if not norm:
         return ""
     ent = norm[0]
-    idx = idx if idx is not None else entity_index(None)
-    notes = sorted(idx.get(ent, []), key=lambda n: n.get("date", ""), reverse=True)
+    # notes_for_entity / related_by / co_occurring each take the SQLite fast path when idx is
+    # None and the graph index is built (F4); a caller doing a bulk refresh passes a shared
+    # markdown idx instead, so the helpers reuse it and the vault is scanned once, not per card.
+    notes = notes_for_entity(ent, None, k=500, idx=idx)
     if not notes:
         return ""
     etype = etype or entity_types_index().get(ent, "entity")
@@ -3203,13 +3225,15 @@ def refresh_entity_cards(entities: list | None = None) -> int:
     """Regenerate entity cards (Brain layer, F2). With `entities` given, refresh just those
     typed entities (the ones a session touched — the per-session path); otherwise refresh EVERY
     typed entity in the store (the sleep-time pass). Off entirely unless a brain profile is
-    active. One vault scan shared across all cards. Returns the count written; never raises."""
+    active. With the SQLite graph built the cards query it directly (F4); otherwise ONE markdown
+    scan is shared across all cards. Returns the count written; never raises."""
     if not _cfg.brain_enabled():
         return 0
     type_idx = entity_types_index()
     if not type_idx:
         return 0
-    idx = entity_index(None)
+    _sx = _scale_index()
+    idx = None if (_sx and _sx.graph_index_ready()) else entity_index(None)
     if entities is None:
         targets = list(type_idx.items())
     else:

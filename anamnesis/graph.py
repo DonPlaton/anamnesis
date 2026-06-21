@@ -39,6 +39,21 @@ def _m():
     return _MH
 
 
+def _sql():
+    """The SQLite scale-index module IF its graph tables are built and authoritative, else None
+    (F4). When present, the entity/relation queries below run in SQL instead of an O(all-notes)
+    markdown scan; when absent, they fall back to the markdown read — which stays the source of
+    truth, so dropping the .sqlite file only costs speed, never correctness."""
+    try:
+        try:
+            from . import index_sqlite as sx
+        except ImportError:
+            import index_sqlite as sx
+        return sx if sx.graph_index_ready() else None
+    except Exception:
+        return None
+
+
 def entity_index(project: str | None = None) -> dict:
     """entity -> [note metas tagged with it]. The shared graph index, built in ONE note
     scan. Pass it to the query helpers below (idx=) so a `--entity` / `--entities` command
@@ -56,7 +71,11 @@ def entity_types_index(project: str | None = None, idx: dict | None = None) -> d
     """entity -> type (paper/method/dataset/...), read from notes' `entity_types`
     frontmatter (Brain layer, F1). Newest note wins when an entity is typed more than once,
     so a re-classification supersedes the old label. Empty until a brain profile has tagged
-    anything — a coding-only store never writes entity_types. Drives the entity cards (F2)."""
+    anything — a coding-only store never writes entity_types. Drives the entity cards (F2).
+    Uses the SQLite graph index at scale (F4), else a markdown scan."""
+    sx = _sql()
+    if sx is not None:
+        return sx.sql_etype_index(project)
     mh = _m()
     notes = mh._iter_project_notes(project) if project else mh._iter_all_notes()
     typed: dict = {}
@@ -69,6 +88,9 @@ def entity_types_index(project: str | None = None, idx: dict | None = None) -> d
 def entities_by_type(etype: str, project: str | None = None) -> list:
     """All known entities classified as `etype` (e.g. every 'method' or 'paper'), sorted.
     The enumeration the entity-card generator walks to know what cards to (re)build."""
+    sx = _sql()
+    if sx is not None:
+        return sx.sql_entities_by_type(etype, project)
     et = etype.strip().lower()
     return sorted(e for e, t in entity_types_index(project).items() if t == et)
 
@@ -96,10 +118,18 @@ def _edges_sorted(counts: dict, k: int | None = None) -> list:
 def notes_for_entity(entity: str, project: str | None = None, k: int = 20,
                      idx: dict | None = None) -> list[dict]:
     """Live notes tagged with `entity` (faceted recall), newest first. The entity is
-    normalised, so 'CUDA' and 'cuda' match. `idx` reuses a pre-built index (no rescan)."""
-    norm = _m()._norm_entities([entity])
+    normalised, so 'CUDA' and 'cuda' match. `idx` reuses a pre-built index (no rescan); with no
+    idx and a built SQLite graph (F4), only the matching stems' files are read, not the vault."""
+    mh = _m()
+    norm = mh._norm_entities([entity])
     if not norm:
         return []
+    if idx is None:
+        sx = _sql()
+        if sx is not None:
+            metas = [mh._note_meta_for_stem(s) for s in sx.sql_stems_for_entity(norm[0], project)]
+            metas = [n for n in metas if n]
+            return sorted(metas, key=lambda n: n.get("date", ""), reverse=True)[:k]
     idx = idx if idx is not None else entity_index(project)
     return sorted(idx.get(norm[0], []), key=lambda n: n.get("date", ""), reverse=True)[:k]
 
@@ -111,6 +141,10 @@ def co_occurring(entity: str, project: str | None = None, k: int = 10,
     if not norm:
         return []
     e = norm[0]
+    if idx is None:
+        sx = _sql()
+        if sx is not None:
+            return sx.sql_co_occurring(e, project, k)
     idx = idx if idx is not None else entity_index(project)
     counts: dict[str, int] = {}
     for n in idx.get(e, []):
@@ -139,10 +173,14 @@ def related_by(entity: str, rel: str | None = None, project: str | None = None,
     norm = _m()._norm_entities([entity])
     if not norm:
         return []
-    idx = idx if idx is not None else entity_index(project)
     rfilter = _m()._norm_entities([rel])
-    return _edges_sorted(_edge_counts(idx.get(norm[0], []), exclude=norm[0],
-                                      rel=rfilter[0] if rfilter else None), k)
+    rel_one = rfilter[0] if rfilter else None
+    if idx is None:
+        sx = _sql()
+        if sx is not None:
+            return sx.sql_related_by(norm[0], rel_one, project, k)
+    idx = idx if idx is not None else entity_index(project)
+    return _edges_sorted(_edge_counts(idx.get(norm[0], []), exclude=norm[0], rel=rel_one), k)
 
 
 def relation_graph(project: str | None = None, top: int = 30) -> dict:

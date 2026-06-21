@@ -227,9 +227,10 @@ def build(verbose: bool = False) -> int:
         cur.execute("INSERT OR REPLACE INTO meta VALUES ('dim', ?)", (str(dim),))
         cur.execute("INSERT OR REPLACE INTO meta VALUES ('vec_format', ?)", (VEC_FORMAT,))
         cur.execute("COMMIT")
+        g = reindex_graph()      # F4: (re)build the entity/relation graph tables from markdown truth
         if verbose:
-            print(f"[index] built {db_path().name}: {n} notes (fts={fts}, model={model})",
-                  file=sys.stderr)
+            print(f"[index] built {db_path().name}: {n} notes, {g} graph rows "
+                  f"(fts={fts}, model={model})", file=sys.stderr)
         return n
     finally:
         con.close()
@@ -279,12 +280,213 @@ def delete(stems) -> int:
         fts = _has_fts(con)
         n = 0
         for stem in stems:
-            cur.execute("DELETE FROM notes WHERE stem = ?", (stem,))
-            n += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-            if fts:
-                cur.execute("DELETE FROM notes_fts WHERE stem = ?", (stem,))
+            try:
+                cur.execute("DELETE FROM notes WHERE stem = ?", (stem,))
+                n += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                if fts:
+                    cur.execute("DELETE FROM notes_fts WHERE stem = ?", (stem,))
+            except sqlite3.Error:
+                pass            # notes/fts absent on a graph-only index — only graph rows to prune
+            for tbl in ("note_entities", "note_relations", "note_etype"):   # F4: keep the graph in sync
+                try:
+                    cur.execute(f"DELETE FROM {tbl} WHERE stem = ?", (stem,))
+                except sqlite3.Error:
+                    pass            # graph tables absent on a pre-F4 index — nothing to prune
         con.commit()
         return n
+    finally:
+        con.close()
+
+
+# ── Entity / relation graph index (Brain layer, F4) ──────────────────────────────
+# The graph queries (typed-entity enumeration, faceted recall, co-occurrence, typed edges)
+# read note FRONTMATTER — an O(all-notes) markdown scan per call. At Brain-layer scale (many
+# typed entities, frequent card refreshes) that stalls. These derived tables index the entity
+# facets so the SAME queries run in SQL. Sourced from the markdown notes (the truth), NOT the
+# embed cache (which carries no entities); rebuilt by reindex_graph()/build(), kept current by
+# upsert_graph(stems)/delete(stems). Drop the .sqlite and nothing is lost.
+
+
+def _create_graph_schema(con: sqlite3.Connection) -> None:
+    # Self-sufficient: each row carries its own project/date, so the graph queries never join
+    # the `notes` table — the graph index works even on a store with no embeddings yet.
+    cur = con.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")  # may run before build()
+    cur.execute("CREATE TABLE IF NOT EXISTS note_entities(stem TEXT, entity TEXT, project TEXT)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ne_entity ON note_entities(entity)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_ne_stem ON note_entities(stem)")
+    cur.execute("CREATE TABLE IF NOT EXISTS note_relations(stem TEXT, rel TEXT, target TEXT, project TEXT)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_nr_stem ON note_relations(stem)")
+    cur.execute("CREATE TABLE IF NOT EXISTS note_etype(stem TEXT, entity TEXT, etype TEXT, project TEXT, date TEXT)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_net_entity ON note_etype(entity)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_net_type ON note_etype(etype)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_net_stem ON note_etype(stem)")
+
+
+def _graph_rows(meta: dict):
+    """A note meta → (entity rows, relation rows, etype rows) for the graph tables."""
+    stem = meta.get("stem")
+    proj = meta.get("project") or ""
+    date = meta.get("date") or ""
+    e_rows = [(stem, e, proj) for e in (meta.get("entities") or []) if e]
+    r_rows = [(stem, ed.get("rel"), ed.get("target"), proj) for ed in (meta.get("relations") or [])
+              if ed.get("rel") and ed.get("target")]
+    t_rows = [(stem, e, t, proj, date) for e, t in (meta.get("entity_types") or {}).items() if e and t]
+    return e_rows, r_rows, t_rows
+
+
+def reindex_graph(metas: list | None = None) -> int:
+    """(Re)build the entity/relation graph tables from note frontmatter (the truth).
+    metas=None → FULL scan of every live note (clears + repopulates); else replace rows for
+    just the given metas' stems (incremental). Derived & rebuildable — any failure is logged
+    and swallowed, leaving the markdown scan as the correct fallback. Returns rows written."""
+    con = _connect()
+    try:
+        _create_graph_schema(con)
+        cur = con.cursor()
+        if metas is None:
+            metas = m._iter_all_notes()
+            cur.execute("DELETE FROM note_entities")
+            cur.execute("DELETE FROM note_relations")
+            cur.execute("DELETE FROM note_etype")
+            full = True
+        else:
+            full = False
+            stems = [mt.get("stem") for mt in metas if mt.get("stem")]
+            for i in range(0, len(stems), 400):          # chunked: stay under SQLite's host-param cap
+                chunk = stems[i:i + 400]
+                q = ",".join("?" * len(chunk))
+                for tbl in ("note_entities", "note_relations", "note_etype"):
+                    cur.execute(f"DELETE FROM {tbl} WHERE stem IN ({q})", chunk)
+        e_all, r_all, t_all = [], [], []
+        for mt in metas:
+            er, rr, tr = _graph_rows(mt)
+            e_all += er
+            r_all += rr
+            t_all += tr
+        cur.executemany("INSERT INTO note_entities VALUES (?,?,?)", e_all)
+        cur.executemany("INSERT INTO note_relations VALUES (?,?,?,?)", r_all)
+        cur.executemany("INSERT INTO note_etype VALUES (?,?,?,?,?)", t_all)
+        if full:
+            cur.execute("INSERT OR REPLACE INTO meta VALUES ('graph_built', '1')")
+        con.commit()
+        return len(e_all) + len(r_all) + len(t_all)
+    except sqlite3.Error as e:
+        m.log(f"graph reindex skipped: {e}")
+        return 0
+    finally:
+        con.close()
+
+
+def upsert_graph(stems) -> int:
+    """Refresh the graph rows for `stems` by reading their note frontmatter — the incremental
+    path the hook calls after writing notes. Reads only the touched files (bounded), so it is
+    cheap even on a huge store. Skips silently if the graph index was never built."""
+    if not stems or not graph_index_ready():
+        return 0
+    metas = []
+    for stem in stems:
+        meta = m._note_meta_for_stem(stem)
+        if meta:
+            metas.append(meta)
+    return reindex_graph(metas) if metas else 0
+
+
+def graph_index_ready() -> bool:
+    """True when the graph tables exist AND a full reindex has stamped them — only then is the
+    SQLite graph authoritative. A never-built or partially-built index falls back to markdown."""
+    if not db_path().exists():
+        return False
+    try:
+        con = _connect()
+        try:
+            built = con.execute("SELECT value FROM meta WHERE key='graph_built'").fetchone()
+            return bool(built and built[0] == "1")
+        except sqlite3.Error:
+            return False
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False
+
+
+def _pfilter(project, col="project"):
+    """(SQL fragment, params) for the project filter on a graph table's OWN project column —
+    no join with `notes`, so the graph index works without any embeddings. '' = all projects."""
+    return (f" AND {col} = ?", [project]) if project else ("", [])
+
+
+def sql_etype_index(project: str | None = None) -> dict:
+    """entity -> newest type, from note_etype (Brain F4)."""
+    con = _connect()
+    try:
+        frag, params = _pfilter(project)
+        rows = con.execute(
+            f"SELECT entity, etype FROM note_etype WHERE 1=1{frag} ORDER BY date", params).fetchall()
+        out = {}
+        for ent, typ in rows:           # ascending date → last write (newest) wins
+            out[ent] = typ
+        return out
+    except sqlite3.Error:
+        return {}
+    finally:
+        con.close()
+
+
+def sql_entities_by_type(etype: str, project: str | None = None) -> list:
+    """Entities whose NEWEST type == etype (consistent with the markdown semantics)."""
+    et = etype.strip().lower()
+    return sorted(e for e, t in sql_etype_index(project).items() if t == et)
+
+
+def sql_stems_for_entity(entity: str, project: str | None = None) -> list:
+    """Stems of live notes tagged with `entity` — the fast filter behind notes_for_entity."""
+    con = _connect()
+    try:
+        frag, params = _pfilter(project)
+        rows = con.execute(
+            f"SELECT stem FROM note_entities WHERE entity = ?{frag}", [entity] + params).fetchall()
+        return [r[0] for r in rows]
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+
+
+def sql_co_occurring(entity: str, project: str | None = None, k: int = 10) -> list:
+    """[(entity, shared_notes)] entities sharing a note with `entity`, strongest first."""
+    con = _connect()
+    try:
+        frag, params = _pfilter(project, "a.project")
+        rows = con.execute(
+            "SELECT b.entity, COUNT(*) c FROM note_entities a "
+            "JOIN note_entities b ON a.stem = b.stem AND b.entity <> a.entity "
+            f"WHERE a.entity = ?{frag} GROUP BY b.entity ORDER BY c DESC, b.entity LIMIT ?",
+            [entity] + params + [k]).fetchall()
+        return [(e, c) for e, c in rows]
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+
+
+def sql_related_by(entity: str, rel: str | None = None, project: str | None = None,
+                   k: int = 20) -> list:
+    """[{rel, target, notes}] typed edges declared by notes about `entity`, self-edges
+    excluded (target != entity), optionally filtered to one `rel`. Mirrors graph._edge_counts."""
+    con = _connect()
+    try:
+        frag, params = _pfilter(project, "ne.project")
+        rel_sql, rel_p = (" AND r.rel = ?", [rel]) if rel else ("", [])
+        rows = con.execute(
+            "SELECT r.rel, r.target, COUNT(*) c FROM note_entities ne "
+            "JOIN note_relations r ON r.stem = ne.stem "
+            f"WHERE ne.entity = ? AND r.target <> ?{rel_sql}{frag} "
+            "GROUP BY r.rel, r.target ORDER BY c DESC, r.rel, r.target LIMIT ?",
+            [entity, entity] + rel_p + params + [k]).fetchall()
+        return [{"rel": rl, "target": tg, "notes": c} for rl, tg, c in rows]
+    except sqlite3.Error:
+        return []
     finally:
         con.close()
 
