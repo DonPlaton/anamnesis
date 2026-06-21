@@ -45,24 +45,24 @@ with tempfile.TemporaryDirectory() as td:
     def W(folder, item, proj, date, nt):
         return m.write_typed_note(folder, item, proj, date, [], nt)
 
-    W("Mistakes", {"title": "GEARS OOM", "description": "vram", "entities": ["gears", "cuda"],
-      "entity_types": {"gears": "method"},
+    W("Mistakes", {"title": "ResNet OOM", "description": "vram", "entities": ["resnet", "cuda"],
+      "entity_types": {"resnet": "method"},
       "relations": [{"rel": "fixed-by", "target": "checkpointing"}]},
-      "gears_experiments", "2026-05-26", "mistake")
-    W("Patterns", {"title": "GEARS scaling", "entities": ["gears", "scaling"],
-      "entity_types": {"gears": "method"}}, "nexus", "2026-06-12", "pattern")
+      "vision", "2026-05-26", "mistake")
+    W("Patterns", {"title": "ResNet scaling", "entities": ["resnet", "scaling"],
+      "entity_types": {"resnet": "method"}}, "speech", "2026-06-12", "pattern")
     W("Decisions", {"title": "Use ImageNet", "entities": ["imagenet", "cuda"],
-      "entity_types": {"imagenet": "dataset"}}, "gears_experiments", "2026-06-01", "decision")
+      "entity_types": {"imagenet": "dataset"}}, "vision", "2026-06-01", "decision")
 
     # ── markdown baseline (no index yet) ────────────────────────────────────────
     print("markdown baseline (no index)")
     check("no index file → graph falls back to markdown", not sx.graph_index_ready())
     md_etypes = dict(m.entity_types_index())
     md_methods = list(m.entities_by_type("method"))
-    md_gears = sorted(n["stem"] for n in m.notes_for_entity("gears"))
+    md_resnet = sorted(n["stem"] for n in m.notes_for_entity("resnet"))
     md_cooc = dict(m.co_occurring("cuda"))
-    md_rel = m.related_by("gears")
-    check("markdown etype index correct", md_etypes == {"gears": "method", "imagenet": "dataset"})
+    md_rel = m.related_by("resnet")
+    check("markdown etype index correct", md_etypes == {"resnet": "method", "imagenet": "dataset"})
 
     # ── build the SQLite graph index ────────────────────────────────────────────
     print("build graph index")
@@ -73,20 +73,20 @@ with tempfile.TemporaryDirectory() as td:
     # ── parity: the SQLite path returns IDENTICAL results ───────────────────────
     print("parity (SQLite == markdown)")
     check("etype-index parity", dict(m.entity_types_index()) == md_etypes)
-    check("entities_by_type parity", list(m.entities_by_type("method")) == md_methods == ["gears"])
+    check("entities_by_type parity", list(m.entities_by_type("method")) == md_methods == ["resnet"])
     check("notes_for_entity parity (same stems)",
-          sorted(n["stem"] for n in m.notes_for_entity("gears")) == md_gears and len(md_gears) == 2)
+          sorted(n["stem"] for n in m.notes_for_entity("resnet")) == md_resnet and len(md_resnet) == 2)
     check("co_occurring parity", dict(m.co_occurring("cuda")) == md_cooc)
-    check("related_by parity", m.related_by("gears") == md_rel
+    check("related_by parity", m.related_by("resnet") == md_rel
           and md_rel == [{"rel": "fixed-by", "target": "checkpointing", "notes": 1}])
-    check("project scoping in SQL (cuda absent from nexus)",
-          m.notes_for_entity("cuda", "nexus") == [])
-    check("sql helper used directly returns data", sx.sql_etype_index().get("gears") == "method")
+    check("project scoping in SQL (cuda absent from speech)",
+          m.notes_for_entity("cuda", "speech") == [])
+    check("sql helper used directly returns data", sx.sql_etype_index().get("resnet") == "method")
 
     # ── incremental upsert + delete ─────────────────────────────────────────────
     print("incremental maintenance")
     new = W("Patterns", {"title": "LoRA finetune", "entities": ["lora"],
-            "entity_types": {"lora": "method"}}, "nexus", "2026-06-15", "pattern")
+            "entity_types": {"lora": "method"}}, "speech", "2026-06-15", "pattern")
     sx.upsert_graph([new])
     check("upsert_graph adds the new typed entity", "lora" in sx.sql_etype_index())
     check("new entity queryable through the graph API", "lora" in m.entities_by_type("method"))
