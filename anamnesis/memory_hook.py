@@ -807,13 +807,16 @@ def _brain_prompt_block() -> str:
     if not _cfg.brain_enabled():
         return ""
     types = ", ".join(_cfg.entity_types())
+    hints = _cfg.relation_hints()
+    rel_line = (' Для рёбер relations предпочитай связи знания: ' + ", ".join(hints) + "."
+                if hints else "")
     # Inserted as a .format() VALUE (not itself re-formatted), so braces are single here.
     return (
         "\n\nKNOWLEDGE-ГРАФ (профиль второго мозга включён): в каждой категории, для тех "
         "entities, что являются реальными ОБЪЕКТАМИ ЗНАНИЯ (не файлы/переменные/код), добавь "
         'поле "entity_types" — словарь {"сущность": "тип"}. Допустимые типы: ' + types + ". "
-        'Пример: "entity_types": {"gears": "method", "imagenet": "dataset"}. '
-        "Код-сущности НЕ типизируй — пропусти их."
+        'Пример: "entity_types": {"gears": "method", "imagenet": "dataset"}.' + rel_line +
+        " Код-сущности НЕ типизируй — пропусти их."
     )
 
 

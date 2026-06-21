@@ -46,8 +46,22 @@ PROJECTS_ROOT = _expand(os.environ.get("ANAMNESIS_PROJECTS_ROOT")
 # Read as functions (not import-time constants) so a value set by load_dotenv() or a
 # test's monkeypatch is honoured live.
 ONTOLOGY = {
-    "research": ["paper", "method", "dataset", "experiment", "result", "venue", "person"],
+    # The researcher's world (wide): publications, the methods/models/architectures under study,
+    # what they are trained and evaluated on, the numbers, the tools, and the people/venues around
+    # them. A richer ontology lets the self-wiring graph mirror how a researcher actually thinks.
+    "research": ["paper", "method", "architecture", "model", "dataset", "benchmark",
+                 "metric", "task", "concept", "experiment", "result", "tool", "venue", "person"],
+    # The generalist's world: a lighter personal-knowledge layer.
     "general":  ["topic", "person", "place", "work", "idea"],
+}
+
+# Suggested typed edges per profile — guides extraction toward a graph that actually connects the
+# entities above (the model may still emit the generic rel set; nothing is allow-listed away). The
+# research edges are the scholarly relations a literature/experiment graph is built from.
+RELATION_HINTS = {
+    "research": ["cites", "builds-on", "extends", "evaluated-on", "trained-on",
+                 "reproduces", "refutes", "outperforms", "authored-by", "submitted-to"],
+    "general":  ["relates-to", "part-of", "influenced-by"],
 }
 
 
@@ -72,6 +86,17 @@ def entity_types() -> list:
         for t in ONTOLOGY.get(p, []):
             if t not in out:
                 out.append(t)
+    return out
+
+
+def relation_hints() -> list:
+    """Suggested typed-edge names for the active brain profiles (e.g. cites / evaluated-on),
+    in declaration order. Empty for a coding-only install — the generic rel set is used then."""
+    out: list = []
+    for p in profiles():
+        for r in RELATION_HINTS.get(p, []):
+            if r not in out:
+                out.append(r)
     return out
 
 

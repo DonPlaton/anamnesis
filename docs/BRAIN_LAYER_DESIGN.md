@@ -54,7 +54,7 @@ First run asks once: **"What will you use Anamnesis for?"** (multi-select):
 | Profile     | Brain layer | Ontology enabled                                   |
 |-------------|-------------|----------------------------------------------------|
 | `coding`    | OFF (default) | — (sessions → mistakes/patterns/decisions only)  |
-| `research`  | ON          | paper, method, dataset, experiment, result, venue, person |
+| `research`  | ON          | paper, method, architecture, model, dataset, benchmark, metric, task, concept, experiment, result, tool, venue, person |
 | `general`   | ON          | topic, person, place, work, idea                   |
 
 - Stored as `ANAMNESIS_PROFILE` (comma-separated) in config / vault config file; env
@@ -67,10 +67,12 @@ First run asks once: **"What will you use Anamnesis for?"** (multi-select):
 
 ### F1 — Entity layer (extends `graph.py`)
 - First-class entity **types** beyond code symbols, gated by active profile:
-  - research: `paper`, `method`, `dataset`, `experiment`, `result`, `venue`, `person`
+  - research (wide): `paper`, `method`, `architecture`, `model`, `dataset`, `benchmark`,
+    `metric`, `task`, `concept`, `experiment`, `result`, `tool`, `venue`, `person`
   - general:  `topic`, `person`, `place`, `work`, `idea`
-- Typed **edges**: `cites`, `builds_on`, `evaluated_on`, `reproduces`, `refutes`,
-  `authored_by`, `submitted_to` (research); `relates_to`, `mentions` (general).
+- Typed **edge hints** (`config.RELATION_HINTS`, suggested not allow-listed): research —
+  `cites`, `builds-on`, `extends`, `evaluated-on`, `trained-on`, `reproduces`, `refutes`,
+  `outperforms`, `authored-by`, `submitted-to`; general — `relates-to`, `part-of`, `influenced-by`.
 - **Extraction**: the SessionEnd / sleep-time extractor gains an entity pass, added to
   the prompt ONLY when a Brain profile is active. Recognises arXiv IDs, method/arch
   names, metric names, dataset names. Runs on the SAME backend routing (local Ollama for

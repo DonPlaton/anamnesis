@@ -64,6 +64,17 @@ check("brain ON when general present", cfg.brain_enabled() is True)
 check("general ontology exposed", {"topic", "idea"} <= set(cfg.entity_types()))
 check("coding composes with general without crashing", "paper" not in cfg.entity_types())
 
+# wide research ontology + research relation hints
+set_profile("research")
+check("research ontology is WIDE (>= 14 types)", len(cfg.entity_types()) >= 14)
+check("wide ontology adds architecture/benchmark/metric/task/concept/tool",
+      {"architecture", "benchmark", "metric", "task", "concept", "tool"} <= set(cfg.entity_types()))
+check("research relation hints exposed (cites / evaluated-on)",
+      {"cites", "evaluated-on"} <= set(cfg.relation_hints()))
+check("coding-only has no relation hints", (set_profile("coding") or cfg.relation_hints()) == [])
+set_profile("research")
+check("brain_block surfaces a research relation hint", "cites" in m._brain_prompt_block())
+
 # ── entity_types normalizer: write-gating vs lenient read ───────────────────────
 print("entity_types normalizer")
 set_profile("research")
@@ -109,10 +120,10 @@ with tempfile.TemporaryDirectory() as td:
     stem = m.write_typed_note("Patterns",
         {"title": "Train GEARS with bf16", "description": "mixed precision works",
          "entities": ["gears", "bfloat16"],
-         "entity_types": {"gears": "method", "bfloat16": "concept"}},   # concept ∉ ontology → dropped
+         "entity_types": {"gears": "method", "bfloat16": "codevar"}},   # codevar ∉ ontology → dropped
         "demo", "2026-06-10", [], "pattern")
     fm = m._read_frontmatter_file(m.VAULT / "Patterns" / f"{stem}.md")
-    check("entity_types written, ontology-filtered (bfloat16/concept dropped)",
+    check("entity_types written, ontology-filtered (non-ontology type dropped)",
           fm.get("entity_types") == {"gears": "method"})
     meta = m._note_meta(m.VAULT / "Patterns" / f"{stem}.md", "pattern", m.parse_typed_stem(stem))
     check("_note_meta reads entity_types back", meta.get("entity_types") == {"gears": "method"})
