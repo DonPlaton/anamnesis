@@ -78,9 +78,9 @@ check("brain_block surfaces a research relation hint", "cites" in m._brain_promp
 # ── entity_types normalizer: write-gating vs lenient read ───────────────────────
 print("entity_types normalizer")
 set_profile("research")
-wt = m._norm_entity_types({"GEARS": "method", "ImageNet": "dataset", "foo.py": "file"})
+wt = m._norm_entity_types({"ResNet": "method", "ImageNet": "dataset", "foo.py": "file"})
 check("write-gate keeps ontology types + normalises names",
-      wt == {"gears": "method", "imagenet": "dataset"})
+      wt == {"resnet": "method", "imagenet": "dataset"})
 check("write-gate drops a non-ontology type ('file' absent from research ontology)",
       "foo-py" not in wt)
 check("non-dict → {}", m._norm_entity_types(["x"]) == {} and m._norm_entity_types(None) == {})
@@ -89,9 +89,9 @@ check("junk/injection in the type slot is dropped by the gate",
 
 set_profile("coding")
 check("coding-only write-gate yields nothing (brain off)",
-      m._norm_entity_types({"gears": "method"}) == {})
+      m._norm_entity_types({"resnet": "method"}) == {})
 check("lenient read keeps stored type regardless of current profile",
-      m._norm_entity_types({"gears": "method"}, gate=False) == {"gears": "method"})
+      m._norm_entity_types({"resnet": "method"}, gate=False) == {"resnet": "method"})
 set_profile("research")
 
 # ── extraction prompt block: present only when brain on ─────────────────────────
@@ -118,22 +118,22 @@ with tempfile.TemporaryDirectory() as td:
     m.VAULT = Path(td)
     set_profile("research")
     stem = m.write_typed_note("Patterns",
-        {"title": "Train GEARS with bf16", "description": "mixed precision works",
-         "entities": ["gears", "bfloat16"],
-         "entity_types": {"gears": "method", "bfloat16": "codevar"}},   # codevar ∉ ontology → dropped
+        {"title": "Train ResNet with bf16", "description": "mixed precision works",
+         "entities": ["resnet", "bfloat16"],
+         "entity_types": {"resnet": "method", "bfloat16": "codevar"}},   # codevar ∉ ontology → dropped
         "demo", "2026-06-10", [], "pattern")
     fm = m._read_frontmatter_file(m.VAULT / "Patterns" / f"{stem}.md")
     check("entity_types written, ontology-filtered (non-ontology type dropped)",
-          fm.get("entity_types") == {"gears": "method"})
+          fm.get("entity_types") == {"resnet": "method"})
     meta = m._note_meta(m.VAULT / "Patterns" / f"{stem}.md", "pattern", m.parse_typed_stem(stem))
-    check("_note_meta reads entity_types back", meta.get("entity_types") == {"gears": "method"})
+    check("_note_meta reads entity_types back", meta.get("entity_types") == {"resnet": "method"})
 
     m.write_typed_note("Decisions",
-        {"title": "GEARS is our architecture", "entities": ["gears"],
-         "entity_types": {"gears": "method"}}, "demo", "2026-06-12", [], "decision")
+        {"title": "ResNet is our architecture", "entities": ["resnet"],
+         "entity_types": {"resnet": "method"}}, "demo", "2026-06-12", [], "decision")
     ti = m.entity_types_index("demo")
-    check("entity_types_index maps gears -> method", ti.get("gears") == "method")
-    check("entities_by_type('method') lists gears", "gears" in m.entities_by_type("method", "demo"))
+    check("entity_types_index maps resnet -> method", ti.get("resnet") == "method")
+    check("entities_by_type('method') lists resnet", "resnet" in m.entities_by_type("method", "demo"))
     check("entities_by_type('paper') empty here", m.entities_by_type("paper", "demo") == [])
 
     s2 = m.write_typed_note("Patterns", {"title": "plain note", "entities": ["x-thing"]},
@@ -148,8 +148,8 @@ with tempfile.TemporaryDirectory() as td:
     m.write_typed_note("Patterns", {"title": "real lesson", "entities": ["e1"]},
                        "demo", "2026-06-01", [], "pattern")
     (m.VAULT / "Entities").mkdir(parents=True, exist_ok=True)   # F2 will generate these cards
-    (m.VAULT / "Entities" / "method-gears.md").write_text(
-        "---\ntype: entity\nentity_type: method\nproject: demo\n---\n# GEARS\nbody\n",
+    (m.VAULT / "Entities" / "method-resnet.md").write_text(
+        "---\ntype: entity\nentity_type: method\nproject: demo\n---\n# ResNet\nbody\n",
         encoding="utf-8")
     pool = m._iter_all_notes()
     check("only the typed note is in the cross-project pool — Entities/ excluded",
@@ -164,48 +164,48 @@ with tempfile.TemporaryDirectory() as td:
     m.VAULT = Path(td)
     set_profile("research")
     m.write_typed_note("Mistakes",
-        {"title": "GEARS checkpoint drops morph flag", "description": "bool not a registered buffer",
-         "entities": ["gears", "checkpoint"], "entity_types": {"gears": "method"},
+        {"title": "ResNet checkpoint drops morph flag", "description": "bool not a registered buffer",
+         "entities": ["resnet", "checkpoint"], "entity_types": {"resnet": "method"},
          "relations": [{"rel": "fixed-by", "target": "buffer-registration"}]},
-        "gears_experiments", "2026-05-26", [], "mistake")
+        "vision", "2026-05-26", [], "mistake")
     m.write_typed_note("Patterns",
-        {"title": "GEARS scales to 30M params", "description": "modular pillars work",
-         "entities": ["gears", "scaling"], "entity_types": {"gears": "method"}},
-        "nexus", "2026-06-12", [], "pattern")
+        {"title": "ResNet scales to 30M params", "description": "modular pillars work",
+         "entities": ["resnet", "scaling"], "entity_types": {"resnet": "method"}},
+        "speech", "2026-06-12", [], "pattern")
     m.write_typed_note("Decisions",
         {"title": "ImageNet as the eval set", "description": "standard benchmark",
          "entities": ["imagenet"], "entity_types": {"imagenet": "dataset"}},
-        "gears_experiments", "2026-06-01", [], "decision")
+        "vision", "2026-06-01", [], "decision")
 
     n = m.refresh_entity_cards()
-    check("refresh_entity_cards writes one card per typed entity (gears, imagenet)", n == 2)
+    check("refresh_entity_cards writes one card per typed entity (resnet, imagenet)", n == 2)
     cdir = m.VAULT / "Entities"
     check("cards live under Entities/",
-          cdir.is_dir() and (cdir / "method-gears.md").exists() and (cdir / "dataset-imagenet.md").exists())
+          cdir.is_dir() and (cdir / "method-resnet.md").exists() and (cdir / "dataset-imagenet.md").exists())
 
-    card = (cdir / "method-gears.md").read_text(encoding="utf-8")
-    cfm = m._read_frontmatter_file(cdir / "method-gears.md")
-    check("card frontmatter: type=entity, entity_type=method, name=gears",
-          cfm.get("type") == "entity" and cfm.get("entity_type") == "method" and cfm.get("name") == "gears")
+    card = (cdir / "method-resnet.md").read_text(encoding="utf-8")
+    cfm = m._read_frontmatter_file(cdir / "method-resnet.md")
+    check("card frontmatter: type=entity, entity_type=method, name=resnet",
+          cfm.get("type") == "entity" and cfm.get("entity_type") == "method" and cfm.get("name") == "resnet")
     check("card aggregates BOTH projects (cross-project rollup)",
-          set(cfm.get("projects") or []) == {"gears_experiments", "nexus"})
+          set(cfm.get("projects") or []) == {"vision", "speech"})
     check("card spans first/last seen", cfm.get("first_seen") == "2026-05-26"
           and cfm.get("last_seen") == "2026-06-12")
     check("card body lists the lessons + the typed neighbour",
-          "GEARS checkpoint drops morph flag" in card and "fixed-by" in card)
+          "ResNet checkpoint drops morph flag" in card and "fixed-by" in card)
 
     pool = m._iter_all_notes()
     check("entity card is NOT in the recall pool — only the 3 typed notes (separation)",
           len(pool) == 3 and all(p["ntype"] in ("pattern", "mistake", "decision") for p in pool))
 
-    check("entity_card() reads the cached card", "🧠 gears · method" in m.entity_card("gears"))
-    check("api.entity_card surface works (case-normalised)", "method" in api.entity_card("GEARS"))
-    check("api.entities_by_type lists typed entities", api.entities_by_type("method") == ["gears"])
+    check("entity_card() reads the cached card", "🧠 resnet · method" in m.entity_card("resnet"))
+    check("api.entity_card surface works (case-normalised)", "method" in api.entity_card("ResNet"))
+    check("api.entities_by_type lists typed entities", api.entities_by_type("method") == ["resnet"])
 
-    mtime = (cdir / "method-gears.md").stat().st_mtime
+    mtime = (cdir / "method-resnet.md").stat().st_mtime
     m.refresh_entity_cards()
     check("re-refresh is idempotent (no rewrite when unchanged)",
-          (cdir / "method-gears.md").stat().st_mtime == mtime)
+          (cdir / "method-resnet.md").stat().st_mtime == mtime)
     check("unknown entity → empty card", m.entity_card("nonexistent-xyz") == "")
     check("untyped entity (checkpoint) gets no card file", not (cdir / "entity-checkpoint.md").exists())
 
@@ -214,8 +214,8 @@ print("entity cards opt-in (coding = none)")
 with tempfile.TemporaryDirectory() as td:
     m.VAULT = Path(td)
     set_profile("coding")
-    check("refresh_entity_cards is a no-op under coding", m.refresh_entity_cards(["gears"]) == 0)
-    check("write_entity_card is a no-op under coding", m.write_entity_card("gears", "method") == "")
+    check("refresh_entity_cards is a no-op under coding", m.refresh_entity_cards(["resnet"]) == 0)
+    check("write_entity_card is a no-op under coding", m.write_entity_card("resnet", "method") == "")
     check("no Entities/ folder created under coding", not (m.VAULT / "Entities").exists())
 
 # ── F3: temporal / evolution ─────────────────────────────────────────────────────

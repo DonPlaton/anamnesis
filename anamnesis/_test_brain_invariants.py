@@ -53,8 +53,8 @@ def seed_vault(td):
     """A small vault: real typed notes + generated entity cards (brain on)."""
     m.VAULT = Path(td)
     set_profile("research")
-    m.write_typed_note("Mistakes", {"title": "GEARS OOM at batch 64", "description": "vram blew up",
-        "entities": ["gears", "cuda"], "entity_types": {"gears": "method"},
+    m.write_typed_note("Mistakes", {"title": "ResNet OOM at batch 64", "description": "vram blew up",
+        "entities": ["resnet", "cuda"], "entity_types": {"resnet": "method"},
         "relations": [{"rel": "fixed-by", "target": "checkpointing"}]},
         "demo", "2026-06-01", [], "mistake")
     m.write_typed_note("Patterns", {"title": "Cap the batch size", "description": "use grad accum",
@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory() as td:
     proj = seed_vault(td)
     (m.VAULT / "Context").mkdir(exist_ok=True)
     (m.VAULT / "Context" / f"{proj}.md").write_text(
-        "---\ntype: context\n---\n## Накопленное состояние\nGEARS training.\n", encoding="utf-8")
+        "---\ntype: context\n---\n## Накопленное состояние\nResNet training.\n", encoding="utf-8")
 
     _orig = {n: getattr(m, n) for n in ("is_tracked_project", "derive_project_from_cwd",
                                         "retrieve_relevant", "retrieve_cross_project")}
