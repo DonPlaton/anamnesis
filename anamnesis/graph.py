@@ -68,7 +68,7 @@ def entity_index(project: str | None = None) -> dict:
     return idx
 
 
-def entity_types_index(project: str | None = None, idx: dict | None = None) -> dict:
+def entity_types_index(project: str | None = None) -> dict:
     """entity -> type (paper/method/dataset/...), read from notes' `entity_types`
     frontmatter (Brain layer, F1). Newest note wins when an entity is typed more than once,
     so a re-classification supersedes the old label. Empty until a brain profile has tagged

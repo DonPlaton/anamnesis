@@ -100,9 +100,11 @@ First run asks once: **"What will you use Anamnesis for?"** (multi-select):
   fast at 10K–100K notes.
 
 ### F5 — Salience (sleep-time)
-- `consolidate_memory.py` scores note/entity salience (recurrence + inbound-reference
-  count + recency) and feeds it into ranking (a generalisation of recurrence-boost).
-  Runs weekly on local GPU — zero agent-context tokens; net-improves injection signal.
+- `consolidate_memory.py` scores note salience as pure graph **centrality** (inbound relation
+  edges + co-occurrence degree) — the signal ORTHOGONAL to recurrence, which the ranker already
+  applies separately (folding recurrence into salience too would double-count it). Stamped into
+  frontmatter, read as a gentle ranking nudge and a keep-over-archive prior. Runs weekly on local
+  GPU — zero agent-context tokens; inert on an entity-less store.
 - Contradiction detection: **optional / later** — supersession already covers most.
 
 ## 5. Out of scope (explicitly rejected)
