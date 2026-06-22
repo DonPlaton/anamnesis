@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/hero.svg" alt="Anamnesis — local-first long-term memory for AI coding agents · plain Markdown + Git · zero dependencies · LongMemEval R@5 0.80 › Mem0 0.76" width="840">
+<img src="docs/banner.png" alt="Anamnesis — local-first long-term memory for AI coding agents · plain Markdown + Git · zero dependencies · private by default · readable by design" width="880">
 
 # 🧠 Anamnesis
 
