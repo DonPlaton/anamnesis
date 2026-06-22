@@ -221,14 +221,24 @@ redacted before anything is written or sent. The store is yours, on your disk, u
 git clone https://github.com/DonPlaton/anamnesis && cd anamnesis
 python install.py            # idempotent; backs up ~/.claude/settings.json before wiring hooks
 python install.py --ollama   # also pull the local models (bge-m3 embedder + an extraction model)
+python install.py --profile research   # turn on the opt-in Brain layer (research/general)
 python install.py --print    # dry run, shows what it would do and writes nothing
 ```
+
+The installer ends by printing your options — which profile is active and how to switch the Brain
+layer on (`coding` is the default; `research`/`general` add the knowledge graph), so a first run is
+self-explanatory.
 
 For cloud extraction, copy `.env.example` to `.env` and add one key. With no key it uses local
 Ollama. To skip a local model for recall too, set `ANAMNESIS_EMBED_PROVIDER` with the matching key
 and run `embed_index.py --rebuild` once. With no backend at all, extraction pauses loudly (sessions
 are kept and retried, never dropped) and recall runs on lexical full-text search until an embedder
 shows up.
+
+**Projects you already have.** Once the hooks are wired, every new session is captured automatically,
+and past Claude Code sessions backfill on the catch-up sweep — no action needed. To seed a rich
+context card for a large existing project right away instead of waiting for sessions to accumulate,
+point the bootstrapper at it: `python -m anamnesis.bootstrap_contexts /path/to/project`.
 
 ## Tests
 

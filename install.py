@@ -4,6 +4,7 @@
     python install.py                 # wire hooks + create the store (safe, idempotent)
     python install.py --ollama        # also pull the local models (bge-m3, qwen3)
     python install.py --tasks         # also register the Windows safety-net tasks
+    python install.py --profile research   # turn on the Brain layer (research/general/coding)
     python install.py --print         # dry-run: show what would change, write nothing
 
 What it does (all idempotent, re-runnable):
@@ -13,6 +14,9 @@ What it does (all idempotent, re-runnable):
      run the engine. Existing hooks from other tools are preserved.
   3. Print the MCP-client snippet (Cursor / Claude Desktop / Cline / Zed).
   4. (--ollama) pull bge-m3 + qwen3.  (--tasks) register the scheduled tasks.
+     (--profile) persist ANAMNESIS_PROFILE so the opt-in Brain layer turns on.
+  5. Close with the options the user has: profiles, and how to bring in projects
+     they already have — so a first-time install is self-explanatory.
 
 Uses the current interpreter (sys.executable); no hard-coded paths.
 """
@@ -23,6 +27,11 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+try:                                       # never crash printing on a non-UTF-8 (e.g. cp1251) console
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 PKG = Path(__file__).resolve().parent / "anamnesis"
 HOOK = PKG / "memory_hook.py"
@@ -236,10 +245,63 @@ def detect_backends() -> None:
         print(f"[backends] detection skipped ({type(exc).__name__})")
 
 
+def configure_profile() -> str | None:
+    """Honour `--profile <name[,name]>`: persist ANAMNESIS_PROFILE into the package
+    .env that the hook already loads, so the opt-in Brain layer turns on for this
+    install. Validated against the known profiles; upserts (never clobbers other keys).
+    Returns the active profile string, or None when the flag is absent/invalid."""
+    if "--profile" not in sys.argv:
+        return None
+    i = sys.argv.index("--profile")
+    raw = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+    valid = {"coding", "research", "general"}
+    parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    if not parts or any(p not in valid for p in parts):
+        print(f"[profile] --profile expects a comma-list of {sorted(valid)}; got {raw!r} — skipped")
+        return None
+    value = ",".join(dict.fromkeys(parts))         # dedup, preserve order
+    envf = PKG / ".env"
+    kept = []
+    if envf.exists():
+        kept = [l for l in envf.read_text(encoding="utf-8").splitlines()
+                if not l.strip().startswith("ANAMNESIS_PROFILE=")]
+    if DRY:
+        print(f"[profile] would set ANAMNESIS_PROFILE={value} in {envf}")
+        return value
+    envf.write_text("\n".join(kept + [f"ANAMNESIS_PROFILE={value}"]) + "\n", encoding="utf-8")
+    print(f"[profile] ANAMNESIS_PROFILE={value} → {envf.name}")
+    return value
+
+
+def print_next_steps(profile: str | None) -> None:
+    """The closing message: spell out the choices a new user actually has — which
+    profile is active and how to change it, and how to bring in projects they already
+    have — so onboarding never leaves the Brain layer or backfill undiscovered."""
+    active = profile or "coding"
+    brain_on = any(p in active for p in ("research", "general"))
+    print("\n--- Your options " + "-" * 47)
+    print("Profiles -- how much Anamnesis remembers (active now: %s):" % active)
+    print("  coding (default)    lean operational memory: mistakes, patterns, decisions")
+    print("  research / general  + an opt-in Brain layer: a self-wiring knowledge graph")
+    print("                      (papers, methods, datasets, ...) with per-entity cards and")
+    print("                      timelines. Pull-only -- never enlarges the token budget.")
+    if not brain_on:
+        print("  -> doing research? re-run:  python install.py --profile research")
+        print("     (or set ANAMNESIS_PROFILE=research in your .env) to switch the Brain layer on.")
+    print("\nBring in projects you already have:")
+    print("  * Every new session is captured automatically from now on.")
+    print("  * Past Claude Code sessions backfill on the catch-up sweep (no action needed).")
+    print("  * Seed a rich card for a big existing project right now:")
+    print("        python -m anamnesis.bootstrap_contexts /path/to/project")
+    print("\nLearn more:  docs/CONFIG.md (all tunables) and docs/BRAIN_LAYER_DESIGN.md (Brain layer)")
+    print("-" * 64)
+
+
 def main() -> int:
     print(f"Anamnesis installer ({'DRY-RUN' if DRY else 'apply'}) — python {PYTHON}\n")
     ensure_store()
     wire_hooks()
+    profile = configure_profile()
     if "--ollama" in sys.argv:
         pull_models()
     if "--tasks" in sys.argv:
@@ -248,6 +310,7 @@ def main() -> int:
     detect_backends()
     print()
     mcp_snippet()
+    print_next_steps(profile)
     print("\nDone. Restart your agent so the new hooks load."
           + ("  (dry-run — nothing was written)" if DRY else ""))
     return 0
