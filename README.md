@@ -89,6 +89,8 @@ You own every byte of your agent's memory, and you can read it.
 
 ## See it work
 
+<p align="center"><img src="docs/demo.gif" alt="Anamnesis demo — an agent learns three lessons; days later a fresh agent recalls the right one by meaning, finds it under different words, and abstains when nothing matches" width="820"></p>
+
 ```
 $ # session 1: you hit a CUDA OOM, Anamnesis quietly records the lesson
 $ # ...days later, session 2, a fresh agent, new prompt:
