@@ -17,6 +17,7 @@ Axes: **Substrate · Retrieval · Temporal/contradiction · Agent-agnostic · Lo
 | **Letta (MemGPT)** | **→ git-backed markdown "MemFS" (Feb 2026)**; was Postgres+vector | self-editing in-context blocks + archival vector; **sleep-time compute** | agent rewrites blocks; **git = versioned history, auto-commit per change** | framework/runtime (some lock-in) | self-host or cloud | **high**: server + Postgres + volume |
 | A-MEM | ChromaDB + in-note links | vector + **Zettelkasten autonomous linking** | **in-place note "evolution"** (LLM rewrites linked notes); no version history | library (MIT) | fully local (Chroma+MiniLM+Ollama) | lowest (pip) |
 | Cognee | vector + graph + SQL (file-based default) | **graph-RAG**, ~14 modes, LLM routing | event-time; bi-temporal via Graphiti backend | yes (MCP) | full local + Ollama | minimal (pip) |
+| **memanto** (moorcheh, 2026) | **closed "Moorcheh" engine** (opaque store; `moorcheh-sdk` + on-prem Docker image); markdown **export-only** | proprietary **"information-theoretic"** single-query ("zero indexing"); 13 typed memory kinds | versioning + **`--as-of`/`--changed-since`** + **`conflicts`** + `daily-summary` | **yes**: `connect` to 8+ (Claude/Cursor/Codex/Windsurf/Cline/Goose/Copilot) | on-prem Docker (no key) but **engine is closed**; cloud tier needs **Moorcheh API key** | **server**: FastAPI `serve`/`ui` + Docker(+Ollama); pip |
 | LangMem / LangGraph | KV+vector BaseStore (Postgres/Redis) | vector + namespace filter | manager upsert/update/invalidate; **procedural prompt-optimizer** | core agnostic; persistence **LangGraph-tied** | self-host or platform | low SDK; DB for prod |
 | ChatGPT memory | cloud account | **always-injected** + opaque profile | edit/delete; **auto-supersession ("Dreaming V3", Jun 2026)** | no (account-locked) | cloud | n/a (managed) |
 | Claude memory | CLAUDE.md (repo) · auto-memory (`~/.claude`, local) · API memory tool · claude.ai | CLAUDE.md/`MEMORY.md` always-injected; topic files model-read | agent-curated; no formal supersession engine | CLAUDE.md portable; rest locked | CLAUDE.md + auto-memory **local** | low (built-in) |
@@ -24,7 +25,7 @@ Axes: **Substrate · Retrieval · Temporal/contradiction · Agent-agnostic · Lo
 | GitHub Copilot Memory | **GitHub cloud** (not repo files) | auto-extracted facts, **validated vs current branch** | **28-day auto-expiry**; stale-guard | no (account-locked) | cloud | built-in |
 | **OKF** (Google/Anthropic draft) | **markdown + YAML + git** (format only) | n/a (interchange *format*, no engine) | optional `log.md`/`timestamp`; **no conflict resolution** | yes (portable) | both | none (a spec) |
 
-*Sources: [Mem0](https://docs.mem0.ai/changelog) · [arXiv:2504.19413](https://arxiv.org/abs/2504.19413); [Graphiti](https://github.com/getzep/graphiti) · [arXiv:2501.13956](https://arxiv.org/abs/2501.13956) · [bi-temporal](https://blog.getzep.com/beyond-static-knowledge-graphs/); [Letta MemFS](https://www.letta.com/blog/context-repositories) · [sleep-time](https://www.letta.com/blog/sleep-time-compute); [A-MEM arXiv:2502.12110](https://arxiv.org/abs/2502.12110); [Cognee](https://github.com/topoteretes/cognee); [LangMem](https://langchain-ai.github.io/langmem/concepts/conceptual_guide/); [ChatGPT Dreaming](https://openai.com/index/chatgpt-memory-dreaming/); [Claude Code memory](https://code.claude.com/docs/en/memory); [Copilot Memory](https://docs.github.com/en/copilot/concepts/agents/copilot-memory); [AGENTS.md](https://agents.md/); OKF SPEC.md (GoogleCloudPlatform/knowledge-catalog).*
+*Sources: [Mem0](https://docs.mem0.ai/changelog) · [arXiv:2504.19413](https://arxiv.org/abs/2504.19413); [Graphiti](https://github.com/getzep/graphiti) · [arXiv:2501.13956](https://arxiv.org/abs/2501.13956) · [bi-temporal](https://blog.getzep.com/beyond-static-knowledge-graphs/); [Letta MemFS](https://www.letta.com/blog/context-repositories) · [sleep-time](https://www.letta.com/blog/sleep-time-compute); [A-MEM arXiv:2502.12110](https://arxiv.org/abs/2502.12110); [Cognee](https://github.com/topoteretes/cognee); [LangMem](https://langchain-ai.github.io/langmem/concepts/conceptual_guide/); [ChatGPT Dreaming](https://openai.com/index/chatgpt-memory-dreaming/); [Claude Code memory](https://code.claude.com/docs/en/memory); [Copilot Memory](https://docs.github.com/en/copilot/concepts/agents/copilot-memory); [AGENTS.md](https://agents.md/); [memanto](https://github.com/moorcheh-ai/memanto) · [arXiv:2604.22085](https://arxiv.org/abs/2604.22085); OKF SPEC.md (GoogleCloudPlatform/knowledge-catalog).*
 
 ## Head-to-head on one stand: MEASURED (local, no paid key)
 
@@ -161,7 +162,18 @@ Effort tags kept for reference. ✅ = shipped.
 **Suggested order:** M-15 → M-14 → M-3 → M-1 → M-2 → M-4 → M-6 → M-5 → M-9.
 (Quick wins + interop first; then the consolidation/contradiction/graph features that close the biggest gaps; then benchmark + reach.)
 
-> Caveats: Mem0/Zep/Cognee benchmark numbers are vendor-self-published and disputed
-> (the Mem0↔Zep LOCOMO war is unreconciled). Mem0 (Apr-2026 rewrite) and Letta
-> (Feb-2026 MemFS) changed architecture recently; classic papers no longer describe
-> shipping behavior. Windsurf is now "Devin Desktop"; Memary is unmaintained.
+> Caveats: Mem0/Zep/Cognee/memanto benchmark numbers are vendor-self-published and
+> disputed (the Mem0↔Zep LOCOMO war is unreconciled). **memanto's headline 89.8%
+> LongMemEval / 87.1% LoCoMo are answer-accuracy** (retrieval + LLM), a *different
+> axis* from the recall@k head-to-head above, and run on a **closed engine
+> (Moorcheh — `moorcheh-sdk` + a proprietary Docker image)**, so they are not
+> independently reproducible the way this table's local, same-embedder numbers are.
+> Anamnesis's own answer-accuracy figure on the comparable axis (standard
+> LongMemEval-oracle, gold context) is **0.788** with an open reasoning reader
+> (deepseek-reasoner); a reader sweep walks it 0.61 → 0.68 → 0.75 → 0.79 with the memory
+> held fixed, localizing the ~0.11 gap to memanto's 0.898 as reader-model strength on hard
+> temporal/multi-session reasoning, not the memory — full decomposition (reader sweep, CoT
+> effect, a negative result on retrieving more) in
+> [`QA_ACCURACY.md`](../anamnesis/research/QA_ACCURACY.md). Mem0 (Apr-2026 rewrite)
+> and Letta (Feb-2026 MemFS) changed architecture recently; classic papers no longer
+> describe shipping behavior. Windsurf is now "Devin Desktop"; Memary is unmaintained.
