@@ -17,7 +17,6 @@ Pure frontmatter scan (reuses digest.compute_digest / compute_conflicts) — no 
 no LLM, no network. `anamnesis.api.dashboard()` returns the HTML string for embedding.
 """
 import html
-import json
 import sys
 import webbrowser
 from pathlib import Path
@@ -31,40 +30,145 @@ try:
 except Exception:
     pass
 
-# Brand palette (matches the v1.1 green branding); a dark theme so a 2000-note store reads
-# calmly. All inline — the file must render with zero external requests.
+# Premium dark developer-tool aesthetic (design-studio: OLED slate + brand green, layered
+# elevation, hairline borders, tabular numerals, CSS-only staggered entrance). All inline —
+# the file must render with zero external requests and open straight off disk on any machine.
 _CSS = """
-:root{--bg:#0d1117;--panel:#161b22;--border:#21262d;--fg:#e6edf3;--muted:#8b949e;
---accent:#2ea043;--accent2:#3fb950;--warn:#d29922;--chip:#1f6feb22}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);
-font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-a{color:var(--accent2);text-decoration:none}
-.wrap{max-width:1040px;margin:0 auto;padding:32px 20px 64px}
-header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
-header h1{margin:0;font-size:22px;font-weight:700}
-header h1 .a{color:var(--accent2)}
-.sub{color:var(--muted);font-size:13px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:22px 0}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
-.card .n{font-size:26px;font-weight:700;color:var(--accent2)}
-.card .l{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-h2{font-size:15px;margin:30px 0 10px;border-bottom:1px solid var(--border);padding-bottom:7px;
-color:var(--fg)}
-h2 .c{color:var(--muted);font-weight:400;font-size:13px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border)}
-td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
-tr:hover td{background:#ffffff06}
-.bar{height:7px;border-radius:4px;background:var(--accent);display:inline-block;min-width:2px;vertical-align:middle}
-.chip{display:inline-block;background:var(--chip);color:#79c0ff;border-radius:20px;
-padding:1px 9px;margin:2px 3px 2px 0;font-size:12px}
-.t-mistake{color:#f85149}.t-pattern{color:var(--accent2)}.t-decision{color:#d2a8ff}
-.evo{color:var(--warn);font-size:12px}
-.muted{color:var(--muted)}
-.arrow{color:var(--muted)}
-footer{margin-top:40px;color:var(--muted);font-size:12px;text-align:center}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#080b14; --surface:#0f1524; --surface-2:#141c30; --raised:#182137;
+ --line:rgba(148,163,184,.10); --line-2:rgba(148,163,184,.16);
+ --fg:#e9eef8; --muted:#8b96ad; --faint:#5a6478;
+ --accent:#34d399; --accent-2:#22c55e; --accent-dim:rgba(52,211,153,.13);
+ --danger:#f87171; --amber:#fbbf24; --violet:#c084fc; --blue:#7ca9ff;
+ --r:16px; --r-sm:11px; --r-xs:8px;
+ --sh-sm:0 1px 2px rgba(2,6,16,.4);
+ --sh-md:0 6px 24px -8px rgba(2,6,16,.7),0 2px 6px rgba(2,6,16,.4);
+ --ease:cubic-bezier(.22,1,.36,1);
+ --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+ --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
+}
+html{-webkit-text-size-adjust:100%}
+body{
+ background:var(--bg);color:var(--fg);font-family:var(--sans);
+ font-size:15px;line-height:1.55;letter-spacing:-.01em;
+ -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+ background-image:
+  radial-gradient(900px 480px at 82% -8%,rgba(52,211,153,.10),transparent 60%),
+  radial-gradient(760px 420px at 8% -12%,rgba(124,169,255,.07),transparent 55%);
+ background-attachment:fixed;min-height:100vh;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:56px 28px 96px}
+a{color:var(--accent);text-decoration:none}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+/* entrance: staggered fade-up, pure CSS, killed under reduced-motion */
+.rv{animation:fadeUp .6s var(--ease) both;animation-delay:calc(var(--i,0)*70ms)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.rv{animation:none}}
+
+/* header */
+header{display:flex;align-items:center;gap:16px;margin-bottom:8px}
+.mark{width:44px;height:44px;border-radius:13px;flex:none;display:grid;place-items:center;
+ background:linear-gradient(145deg,var(--accent),var(--accent-2));
+ box-shadow:0 8px 22px -6px rgba(34,197,94,.5),inset 0 1px 0 rgba(255,255,255,.35)}
+.mark svg{width:24px;height:24px;color:#06210f}
+.brand{display:flex;flex-direction:column;gap:2px}
+.brand h1{font-size:23px;font-weight:700;letter-spacing:-.02em;line-height:1}
+.brand h1 b{background:linear-gradient(90deg,var(--accent),#7ef0c0);
+ -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;font-weight:800}
+.brand .sub{color:var(--muted);font-size:13px;letter-spacing:0}
+.rule{height:1px;background:linear-gradient(90deg,var(--line-2),transparent);margin:22px 0 26px}
+
+/* stat cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px}
+.card{position:relative;background:linear-gradient(180deg,var(--surface-2),var(--surface));
+ border:1px solid var(--line);border-radius:var(--r);padding:18px 18px 16px;overflow:hidden;
+ box-shadow:var(--sh-sm);transition:transform .28s var(--ease),border-color .28s var(--ease),box-shadow .28s var(--ease)}
+.card::before{content:"";position:absolute;inset:0 0 auto 0;height:1px;
+ background:linear-gradient(90deg,transparent,var(--line-2),transparent)}
+.card:hover{transform:translateY(-3px);border-color:var(--line-2);box-shadow:var(--sh-md)}
+.card .l{color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em}
+.card .n{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:33px;font-weight:600;
+ line-height:1.05;margin-top:12px;letter-spacing:-.03em}
+.card.hero .n{background:linear-gradient(120deg,var(--accent),#8ff0c6);
+ -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.card .foot{color:var(--faint);font-size:11.5px;margin-top:5px}
+
+/* section heads */
+h2{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;letter-spacing:.03em;
+ text-transform:uppercase;color:var(--muted);margin:38px 0 14px}
+h2 svg{width:15px;height:15px;color:var(--accent);opacity:.9}
+h2 .c{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--faint);
+ text-transform:none;letter-spacing:0;font-weight:400}
+
+/* tables */
+.panel{background:linear-gradient(180deg,var(--surface),rgba(15,21,36,.6));
+ border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;color:var(--faint);font-weight:600;font-size:11px;text-transform:uppercase;
+ letter-spacing:.06em;padding:12px 16px;border-bottom:1px solid var(--line)}
+td{padding:11px 16px;border-bottom:1px solid var(--line);vertical-align:middle;color:var(--fg)}
+tr:last-child td{border-bottom:0}
+tbody tr{transition:background .18s var(--ease)}
+tbody tr:hover td{background:rgba(148,163,184,.045)}
+.proj{font-weight:600;letter-spacing:-.01em}
+.count{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--fg)}
+.dim{color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px}
+
+/* project bars */
+.bar-cell{width:180px}
+.bar-track{height:8px;border-radius:6px;background:rgba(148,163,184,.10);overflow:hidden}
+.bar{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent-2),var(--accent));
+ box-shadow:0 0 12px -2px rgba(52,211,153,.5)}
+
+/* type pills */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);
+ font-family:var(--mono);margin-right:9px}
+.pill i{width:6px;height:6px;border-radius:50%;display:inline-block}
+.dot-mistake{background:var(--danger)} .dot-pattern{background:var(--accent)} .dot-decision{background:var(--violet)}
+.t-mistake{color:var(--danger)} .t-pattern{color:var(--accent)} .t-decision{color:var(--violet)}
+
+/* entity chips */
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface-2);
+ border:1px solid var(--line);border-radius:999px;padding:6px 13px;font-size:12.5px;
+ transition:border-color .2s var(--ease),transform .2s var(--ease)}
+.chip:hover{border-color:var(--accent-dim);transform:translateY(-1px)}
+.chip b{color:var(--fg);font-weight:600} .chip span{color:var(--faint);font-family:var(--mono);
+ font-variant-numeric:tabular-nums;font-size:11.5px}
+
+/* ledger */
+.arrow{color:var(--faint);margin:0 8px}
+.was{color:var(--muted)} .now{color:var(--fg);font-weight:500}
+.tag{display:inline-block;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+ color:var(--amber);background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.22);
+ border-radius:999px;padding:2px 9px}
+.empty{color:var(--muted);padding:18px 16px;font-size:13.5px}
+
+footer{margin-top:52px;padding-top:22px;border-top:1px solid var(--line);
+ display:flex;align-items:center;gap:8px;color:var(--faint);font-size:12.5px}
+footer .g{width:6px;height:6px;border-radius:50%;background:var(--accent);
+ box-shadow:0 0 8px var(--accent)}
+footer a{color:var(--muted)} footer a:hover{color:var(--accent)}
 """
+
+# Inline feather-style icons (no xmlns — HTML5 inline SVG renders without it, and it keeps the
+# file free of any "http" reference so it stays provably offline/self-contained).
+_ICONS = {
+    "mark": '<path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+    "folder": '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2Z"/>',
+    "hash": '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
+    "activity": '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    "alert": '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>'
+             '<path d="M12 9v4M12 17h.01"/>',
+}
+
+
+def _svg(name: str, cls: str = "") -> str:
+    c = f' class="{cls}"' if cls else ""
+    return (f'<svg{c} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            f'stroke-linecap="round" stroke-linejoin="round">{_ICONS[name]}</svg>')
 
 
 def _e(s) -> str:
@@ -76,79 +180,97 @@ def _type_class(nt: str) -> str:
 
 
 def build_html(project=None, days=30, conflicts_limit=40) -> str:
-    """Render the whole dashboard to one self-contained HTML string."""
+    """Render the whole dashboard to one self-contained, premium HTML string."""
     d = _digest.compute_digest(project, days=days, top_entities=20, recent_n=20)
     conflicts = _digest.compute_conflicts(m.slug_project(project) if project else None,
                                           limit=conflicts_limit)
     t = d["totals"]
     scope = d["project"]
+    ri = [0]                                              # stagger index for entrance reveals
+
+    def rv():
+        ri[0] += 1
+        return f' class="rv" style="--i:{ri[0]}"'
+
     parts = [f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Anamnesis — memory dashboard ({_e(scope)})</title><style>{_CSS}</style></head>
+<title>Anamnesis — {_e(scope)}</title><style>{_CSS}</style></head>
 <body><div class="wrap">
-<header><h1><span class="a">Anamnesis</span> memory dashboard</h1>
-<span class="sub">{_e(scope)} · generated {_e(d['generated'])} · last {days} days</span></header>"""]
+<header{rv()}><div class="mark">{_svg('mark')}</div>
+<div class="brand"><h1><b>Anamnesis</b> memory</h1>
+<span class="sub">{_e(scope)} · {_e(d['generated'])} · last {days} days</span></div></header>
+<div class="rule"></div>"""]
 
     # ── stat cards ──
-    parts.append('<div class="cards">')
-    for n, lbl in ((t["live_notes"], "live notes"), (t["projects"], "projects"),
-                   (t["superseded_notes"], "superseded"),
-                   (t["added_in_window"], f"added · {days}d"),
-                   (t["revised_in_window"], f"revised · {days}d")):
-        parts.append(f'<div class="card"><div class="n">{n}</div><div class="l">{_e(lbl)}</div></div>')
+    cards = [(t["live_notes"], "live notes", "across the store", True),
+             (t["projects"], "projects", "tracked", False),
+             (t["superseded_notes"], "superseded", "history kept", False),
+             (t["added_in_window"], f"added · {days}d", "new lessons", False),
+             (t["revised_in_window"], f"revised · {days}d", "contradictions resolved", False)]
+    parts.append(f'<div class="cards"{rv()}>')
+    for n, lbl, foot, hero in cards:
+        parts.append(f'<div class="card{" hero" if hero else ""}"><div class="l">{_e(lbl)}</div>'
+                     f'<div class="n">{n}</div><div class="foot">{_e(foot)}</div></div>')
     parts.append("</div>")
 
-    # ── per-project table (bar = share of the largest) ──
+    # ── per-project ──
     bp = d["by_project"]
     if bp:
         mx = max((v["total"] for v in bp.values()), default=1) or 1
-        parts.append(f'<h2>By project <span class="c">— {len(bp)}</span></h2>'
-                     '<table><tr><th>project</th><th>notes</th><th></th>'
-                     '<th>+added</th><th>~revised</th><th>types</th></tr>')
+        parts.append(f'<h2{rv()}>{_svg("folder")} By project <span class="c">{len(bp)}</span></h2>'
+                     f'<div class="panel"{rv()}><table><thead><tr><th>project</th><th>notes</th>'
+                     '<th></th><th>added</th><th>revised</th><th>types</th></tr></thead><tbody>')
         for p, v in sorted(bp.items(), key=lambda kv: -kv[1]["total"]):
-            w = int(240 * v["total"] / mx)
-            kinds = " ".join(f'<span class="{_type_class(k)}">{_e(k)}:{c}</span>'
+            w = max(4, round(100 * v["total"] / mx))
+            pills = " ".join(f'<span class="pill"><i class="dot-{k}"></i>{_e(k)} {c}</span>'
                              for k, c in sorted(v["by_type"].items()))
-            parts.append(f'<tr><td>{_e(p)}</td><td>{v["total"]}</td>'
-                         f'<td><span class="bar" style="width:{w}px"></span></td>'
-                         f'<td class="muted">+{v["added"]}</td><td class="muted">{v["superseded"]}</td>'
-                         f'<td>{kinds}</td></tr>')
-        parts.append("</table>")
+            parts.append(f'<tr><td class="proj">{_e(p)}</td><td class="count">{v["total"]}</td>'
+                         f'<td class="bar-cell"><div class="bar-track"><div class="bar" '
+                         f'style="width:{w}%"></div></div></td>'
+                         f'<td class="dim">+{v["added"]}</td><td class="dim">{v["superseded"]}</td>'
+                         f'<td>{pills}</td></tr>')
+        parts.append("</tbody></table></div>")
 
     # ── top entities ──
     if d["top_entities"]:
-        parts.append('<h2>Most-connected entities</h2><div>')
+        parts.append(f'<h2{rv()}>{_svg("hash")} Most-connected entities</h2>'
+                     f'<div class="chips"{rv()}>')
         for e in d["top_entities"]:
-            parts.append(f'<span class="chip">{_e(e["entity"])} · {e["notes"]}</span>')
+            parts.append(f'<span class="chip"><b>{_e(e["entity"])}</b><span>{e["notes"]}</span></span>')
         parts.append("</div>")
 
     # ── recently added ──
     if d["recent"]:
-        parts.append(f'<h2>Recently added <span class="c">— {len(d["recent"])}</span></h2>'
-                     '<table><tr><th>date</th><th>project</th><th>type</th><th>title</th></tr>')
+        parts.append(f'<h2{rv()}>{_svg("activity")} Recently added '
+                     f'<span class="c">{len(d["recent"])}</span></h2>'
+                     f'<div class="panel"{rv()}><table><thead><tr><th>date</th><th>project</th>'
+                     '<th>type</th><th>title</th></tr></thead><tbody>')
         for n in d["recent"]:
-            parts.append(f'<tr><td class="muted">{_e(n["date"])}</td><td>{_e(n["project"])}</td>'
+            parts.append(f'<tr><td class="dim">{_e(n["date"])}</td><td class="proj">{_e(n["project"])}</td>'
                          f'<td class="{_type_class(n["ntype"])}">{_e(n["ntype"])}</td>'
                          f'<td>{_e(n["title"])}</td></tr>')
-        parts.append("</table>")
+        parts.append("</tbody></table></div>")
 
-    # ── conflicts / supersession ledger ──
-    parts.append(f'<h2>Contradiction ledger <span class="c">— {len(conflicts)} revised, '
-                 f'write-time supersession</span></h2>')
+    # ── contradiction ledger ──
+    parts.append(f'<h2{rv()}>{_svg("alert")} Contradiction ledger '
+                 f'<span class="c">{len(conflicts)} revised · write-time supersession</span></h2>')
     if conflicts:
-        parts.append('<table><tr><th>date</th><th>project</th><th>was → now</th><th></th></tr>')
+        parts.append(f'<div class="panel"{rv()}><table><thead><tr><th>date</th><th>project</th>'
+                     '<th>was → now</th><th></th></tr></thead><tbody>')
         for c in conflicts:
-            evo = '<span class="evo">still evolving</span>' if not c["resolved"] else ""
-            nowt = _e(c["new_title"]) if c["new_stem"] else '<span class="muted">(archived)</span>'
-            parts.append(f'<tr><td class="muted">{_e(c["new_date"] or c["old_date"])}</td>'
-                         f'<td>{_e(c["project"])}</td>'
-                         f'<td>{_e(c["old_title"])} <span class="arrow">→</span> {nowt}</td>'
-                         f'<td>{evo}</td></tr>')
-        parts.append("</table>")
+            tag = '' if c["resolved"] else '<span class="tag">evolving</span>'
+            now = (f'<span class="now">{_e(c["new_title"])}</span>' if c["new_stem"]
+                   else '<span class="dim">(archived)</span>')
+            parts.append(f'<tr><td class="dim">{_e(c["new_date"] or c["old_date"])}</td>'
+                         f'<td class="proj">{_e(c["project"])}</td>'
+                         f'<td><span class="was">{_e(c["old_title"])}</span>'
+                         f'<span class="arrow">→</span>{now}</td><td>{tag}</td></tr>')
+        parts.append("</tbody></table></div>")
     else:
-        parts.append('<p class="muted">Nothing superseded yet — no contradictions on record.</p>')
+        parts.append('<div class="panel"><div class="empty">Nothing superseded yet — '
+                     'no contradictions on record.</div></div>')
 
-    parts.append('<footer>Generated by Anamnesis · plain files, no server · '
+    parts.append('<footer><span class="g"></span>Generated by Anamnesis · plain files, no server · '
                  '<a href="https://github.com/DonPlaton/anamnesis">github.com/DonPlaton/anamnesis</a>'
                  '</footer></div></body></html>')
     return "\n".join(parts)
