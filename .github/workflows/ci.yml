@@ -38,3 +38,12 @@ jobs:
           python anamnesis/_test_watch.py
           python anamnesis/_test_quant.py
           python anamnesis/_test_entities.py
+          python anamnesis/_test_digest.py
+          python anamnesis/_test_docparse.py
+          python anamnesis/_test_dashboard.py
+          python anamnesis/_test_guards.py
+          python anamnesis/_test_anticipate.py
+          python anamnesis/_test_causal.py
+          python anamnesis/research/_test_qa_eval.py
+          python anamnesis/research/_test_longitudinal.py
+          python anamnesis/research/_test_live_validation.py

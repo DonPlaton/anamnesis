@@ -37,6 +37,12 @@ anamnesis-ingest = "anamnesis.ingest:main"
 anamnesis-watch = "anamnesis.watch:main"
 anamnesis-mcp = "anamnesis.mcp_server:main"
 anamnesis-tasks = "anamnesis.manage_tasks:main"
+anamnesis-digest = "anamnesis.digest:main"
+anamnesis-conflicts = "anamnesis.digest:conflicts_main"
+anamnesis-dashboard = "anamnesis.dashboard:main"
+anamnesis-guards = "anamnesis.guards:main"
+anamnesis-anticipate = "anamnesis.anticipate:main"
+anamnesis-causal = "anamnesis.causal:main"
 
 [tool.setuptools]
 packages = ["anamnesis", "anamnesis.research", "anamnesis.integrations"]
