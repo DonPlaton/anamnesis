@@ -4,13 +4,15 @@
 
 # 🧠 Anamnesis
 
-### Local-first long-term memory for AI coding agents, in plain Markdown and Git.
+### Local-first long-term memory for AI coding agents — that doesn't just remember, it acts.
 
 *Your coding agent forgets everything the moment a session ends. Anamnesis is the part that
-remembers. It keeps the bug you hit last week, the pattern that finally worked, and the reason
-you picked Postgres over Mongo, then hands the relevant ones back before the agent asks.*
+remembers — the bug you hit last week, the pattern that finally worked, the reason you picked
+Postgres over Mongo. Then it goes further than any other memory: instead of taxing every prompt
+with a wall of recalled text, it stays silent until it has something worth saying, and **acts** —
+catching the mistake before you repeat it. Memory that earns its tokens.*
 
-**No database. No server. No cloud. No API keys required. Zero pip dependencies.**
+**No database. No server. No cloud. No API keys required. Zero pip dependencies. Works with every agent.**
 
 [![tests](https://github.com/DonPlaton/anamnesis/actions/workflows/ci.yml/badge.svg)](https://github.com/DonPlaton/anamnesis/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/DonPlaton/anamnesis/actions/workflows/codeql.yml/badge.svg)](https://github.com/DonPlaton/anamnesis/actions/workflows/codeql.yml)
@@ -19,6 +21,7 @@ you picked Postgres over Mongo, then hands the relevant ones back before the age
 [![Core deps](https://img.shields.io/badge/core%20deps-0%20(stdlib)-orange)](#why-anamnesis)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![LongMemEval](https://img.shields.io/badge/LongMemEval%20R%405-0.80%20%E2%80%BA%20Mem0%200.76-blueviolet)](#benchmarks)
+[![Active Memory](https://img.shields.io/badge/active%20memory-31%C3%97%20fewer%20tokens%20%C2%B7%20%E2%88%9286%25%20errors-2ea043)](#memory-that-acts--the-think-different-part)
 
 ```text
 $ # days ago, a different session, your agent hit a CUDA OOM and Anamnesis recorded the lesson.
@@ -72,11 +75,43 @@ starts with its memory already loaded. The five-minute walkthrough is in [QUICKS
 > data to. Anamnesis is plain files on your disk that you can read, grep, and diff, and nothing
 > leaves the machine by default. The honest, benchmarked comparison is [further down](#benchmarks).
 
+## Memory that acts — the think-different part
+
+Every other memory system is a better **library**: it retrieves text and injects it into the
+prompt, taxing every single turn. We measured that axis to its end and found it is
+[reader-bound and commoditizing](anamnesis/research/QA_ACCURACY.md) — the LLM, not the memory, is
+the variable. So Anamnesis does something no other memory does: it treats memory as a set of
+**token-budgeted interventions** that stay silent until they have something worth saying.
+
+- **Guards (A)** — a past mistake compiles into an executable check that fires *before* you repeat
+  it. **Zero context tokens until it fires.** Popperian by design: advisory until corroborated,
+  self-retiring on false positives, always overridable — memory proposes, reality disposes, the
+  agent is never boxed in.
+- **Anticipation (B)** — predicts the failure your current plan is heading toward by resemblance
+  to past ones, and surfaces *one* precise warning — spend proportional to risk, not paid per turn.
+- **Counterfactual (C)** — *"what breaks if I change X?"* answered from an induced causal graph in
+  a few lines, not an episode dump — **~7× cheaper** than recalling every related note.
+
+And it is **measured on real tasks, not asserted**:
+
+| claim | result | evidence |
+|---|---|---|
+| a fired guard changes a real model's output | real error rate **0.36 → 0.05 (−86%)** on DeepSeek | [LIVE_VALIDATION.md](anamnesis/research/LIVE_VALIDATION.md) |
+| memory that acts vs always-inject | same error-prevention for **~31× fewer tokens**, a *net* token saving | [ACTIVE_MEMORY.md](anamnesis/research/ACTIVE_MEMORY.md) |
+| answer-accuracy on the standard benchmark | **0.788** LongMemEval-oracle (open reasoner) | [QA_ACCURACY.md](anamnesis/research/QA_ACCURACY.md) |
+| retrieval vs the funded leaders | R@5 **0.80** › Mem0 0.76, one shared embedder | [COMPARISON.md](docs/COMPARISON.md) |
+
+All three axes are on the Python API **and** the MCP server, so this works on **every agent** —
+Claude Code, Cursor, Cline, Codex, Zed, and anything else that speaks MCP or writes logs to disk
+([INTEGRATIONS.md](docs/INTEGRATIONS.md)). This is the moat: not a better database, a memory that
+*acts* and costs almost nothing until it does.
+
 ## Why Anamnesis
 
-|  | Anamnesis | Mem0 / Zep / Letta / Cognee |
+|  | Anamnesis | Mem0 / Zep / Letta / Cognee / memanto |
 |---|---|---|
-| **Runs** | your machine, local files | a service, vector DB, or cloud |
+| **Acts, not just recalls** | ✅ guards + anticipation + counterfactual, **0 tokens until they fire** | ✗ retrieve-and-inject only (taxes every turn) |
+| **Runs** | your machine, local files | a service, vector DB, or cloud (memanto: closed engine) |
 | **Store format** | human-readable Markdown + Git | opaque DB rows and embeddings |
 | **Dependencies** | **0** Python packages (stdlib core), local Ollama for embeddings (or an optional cloud embedder) | many, usually a server plus a DB |
 | **Your data leaves the machine?** | **never** by default (local embeddings; cloud embedder is opt-in) | usually, via cloud APIs |
@@ -103,6 +138,32 @@ $ python anamnesis/memory_search.py "training crashes out of gpu memory" myproje
 
 In Claude Code this happens automatically at session start and on each prompt. The agent simply
 already knows.
+
+### Review what it knows
+
+Two read-only commands surface the store for a human or an agent — no embedder, no LLM, no network:
+
+```
+$ python -m anamnesis.digest --days 7      # what was added / revised this week, per project & type
+$ python -m anamnesis.digest --conflicts   # the supersession ledger: every fact the memory revised
+```
+
+`digest` is the daily/weekly "what's new"; `conflicts` is the audit trail behind *"contradictions
+don't pile up"* — each retired note paired with the one that superseded it. Both are also
+`anamnesis.api.digest()` / `anamnesis.api.conflicts()` and MCP tools (`memory_digest`,
+`memory_conflicts`), so an agent can ask too.
+
+Prefer a visual? One command writes a **single self-contained HTML file** — no server, no
+account, no external asset — that you open in a browser:
+
+```
+$ python -m anamnesis.dashboard --days 30      # → memory_dashboard.html, then opens it
+```
+
+It is a snapshot of the whole store (stats, per-project, recent, the contradiction ledger,
+top entities) that you can mail, commit, or read offline. The file *is* the UI, the same way
+the notes *are* the database — no `serve` process to run. (For live editing, the vault opens
+in Obsidian as-is.)
 
 ## How it works
 

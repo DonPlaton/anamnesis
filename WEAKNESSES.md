@@ -30,7 +30,10 @@ below is read in context:
   Gemini-CLI, and an MCP server covers any MCP client. Hooks remain the zero-latency path for
   Claude Code.
 - **W13 (only one external benchmark) is updated.** There is now a full local head-to-head
-  against Mem0, LangMem, and A-MEM on one shared embedder (`research/head_to_head.py`).
+  against Mem0, LangMem, and A-MEM on one shared embedder (`research/head_to_head.py`), and a
+  second external axis: **end-to-end answer-accuracy** on standard LongMemEval-oracle
+  (`research/qa_eval.py` → `QA_ACCURACY.md`) — 0.788 with an open reasoning reader, decomposed
+  by a reader sweep that localizes the gap to vendor headlines as reader strength, not memory.
 - **Scale:** opt-in 1-bit index quantization (`ANAMNESIS_EMBED_QUANT=binary`) plus a popcount
   scan reach six figures of notes with no ANN dependency (`research/QUANTIZATION.md`).
 
