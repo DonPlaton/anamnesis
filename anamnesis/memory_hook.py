@@ -4796,17 +4796,26 @@ def emit_pretooluse_guard(session: dict, cwd: str) -> None:
     except ImportError:
         import guards as _g
     try:
-        hits = _g.check(action, project=project, path=path, tool=session.get("tool_name"))
+        ledger = _g.load_guards()                          # load ONCE; check + fired-bump share it
+        hits = _g.check(action, project=project, path=path, tool=session.get("tool_name"),
+                        guards=ledger)
     except Exception as e:
         log(f"guard check failed: {e}")
         return
     if not hits:
         return
-    for h in hits:
-        try:
-            _g.mark_fired(h["id"])                          # telemetry; never fatal on the hot path
-        except Exception:
-            pass
+    # bump the fired counters in the loaded list and persist in a SINGLE atomic write, instead of
+    # one load+save per hit (avoids write amplification + lost increments under concurrent hooks).
+    try:
+        fired_ids = {h["id"] for h in hits}
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        for g in ledger:
+            if g.get("id") in fired_ids:
+                g["fired"] = g.get("fired", 0) + 1
+                g["last_fired"] = stamp
+        _g.save_guards(ledger)
+    except Exception:
+        pass                                               # telemetry only; never fatal on the hot path
     lines = [("⛔ " if h["status"] == "blocking" else "⚠ ") + h["message"] for h in hits]
     payload = {"hookSpecificOutput": {
         "hookEventName": "PreToolUse",

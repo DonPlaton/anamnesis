@@ -22,6 +22,9 @@ def _isolate(tmp):
 def test_safe_pattern_rejects_redos_and_junk():
     assert G.safe_pattern(r"device\s*=\s*['\"]cpu['\"]")
     assert not G.safe_pattern(r"(a+)+")              # nested quantifier → ReDoS
+    assert not G.safe_pattern(r"(a|aa)+")            # quantified alternation → ReDoS (code-review)
+    assert not G.safe_pattern(r"(foo|foobar)*")      # overlapping alternation blowup
+    assert G.safe_pattern(r"(cpu|gpu)")              # legit alternation (no outer quantifier) is fine
     assert not G.safe_pattern("(" * 60)              # too long / uncompilable
     assert not G.safe_pattern("")
     print("ok test_safe_pattern_rejects_redos_and_junk")

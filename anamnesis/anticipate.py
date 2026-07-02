@@ -154,7 +154,10 @@ def anticipate(trajectory: str, project=None, *, k: int = 1, sigs=None, state=No
     scored = []
     for sig in sigs:
         r = risk_score(traj_toks, sig, idf)
-        if emb_blend and sig["stem"] in emb_blend:
+        # blend the semantic signal only when there is SOME lexical overlap — otherwise bge-m3's
+        # ~0.42 background cosine on unrelated text could fire a warning at zero lexical evidence
+        # (code-review, 2026-07). The blend sharpens a real lexical hit; it never creates one.
+        if emb_blend and r > 0 and sig["stem"] in emb_blend:
             r = max(r, 0.5 * r + 0.5 * emb_blend[sig["stem"]])   # blend, never lower a lexical hit
         if r >= _effective_tau(state, sig["stem"]):
             scored.append((r, sig))

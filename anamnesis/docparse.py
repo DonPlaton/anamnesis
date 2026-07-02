@@ -13,6 +13,7 @@ Used by `ingest.py` (both `--file` and the `--dir` sweep). Unknown extensions fa
 back to a best-effort text read (`raw_fallback=True`) so existing text-glob sweeps
 are unchanged; the structured parsers only fire for the formats above.
 """
+import os
 import xml.etree.ElementTree as ET
 import zipfile
 from html.parser import HTMLParser
@@ -30,6 +31,7 @@ DOC_EXTS = {".docx", ".pdf", ".html", ".htm"}
 SUPPORTED = TEXT_EXTS | DOC_EXTS
 
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+MAX_DOC_BYTES = int(os.environ.get("ANAMNESIS_MAX_DOC_BYTES", str(50 * 1024 * 1024)))  # zip-bomb cap
 
 
 class DocError(Exception):
@@ -39,10 +41,20 @@ class DocError(Exception):
 
 def _docx_text(path: Path) -> str:
     """Plain text from a .docx: concatenate the <w:t> runs of word/document.xml, one
-    line per <w:p> paragraph. Pure stdlib (a .docx is a zip of XML)."""
+    line per <w:p> paragraph. Pure stdlib (a .docx is a zip of XML). ElementTree's expat
+    backend does not resolve external entities (no XXE), and requires-python >= 3.10 rules out
+    the old billion-laughs expansion — the remaining intake risk is a zip bomb, capped below."""
     try:
         with zipfile.ZipFile(path) as z:
+            # refuse a decompression bomb: check the DECLARED uncompressed size before reading,
+            # so a tiny .docx that inflates to gigabytes can't exhaust memory (a real risk for an
+            # `ingest` / MCP path that accepts arbitrary external documents).
+            info = z.getinfo("word/document.xml")
+            if info.file_size > MAX_DOC_BYTES:
+                raise DocError(f".docx body too large ({info.file_size} bytes > {MAX_DOC_BYTES})")
             xml = z.read("word/document.xml")
+    except DocError:
+        raise
     except (zipfile.BadZipFile, KeyError, OSError) as e:
         raise DocError(f"not a readable .docx ({type(e).__name__})")
     try:

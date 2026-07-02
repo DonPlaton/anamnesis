@@ -59,6 +59,31 @@ def test_plain_text_and_raw_fallback():
     print("ok test_plain_text_and_raw_fallback")
 
 
+def test_docx_zip_bomb_capped():
+    # a .docx whose document.xml declares a huge uncompressed size must be refused before read
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "bomb.docx"
+        big = ("<w:p><w:r><w:t>" + "A" * 100 + "</w:t></w:r></w:p>") * 5000
+        _make_docx(p, [])
+        # rewrite with an oversized body and a low cap via env
+        import zipfile
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("word/document.xml",
+                       f'<?xml version="1.0"?><w:document xmlns:w="{_W}"><w:body>{big}</w:body></w:document>')
+        old = dp.MAX_DOC_BYTES
+        dp.MAX_DOC_BYTES = 1000                      # force the cap to trip
+        try:
+            try:
+                dp.extract_text(p)
+            except dp.DocError as e:
+                assert "too large" in str(e)
+                print("ok test_docx_zip_bomb_capped")
+                return
+            raise AssertionError("oversized .docx body must raise DocError")
+        finally:
+            dp.MAX_DOC_BYTES = old
+
+
 def test_pdf_error_path():
     # a non-PDF (or absent pypdf) must raise DocError, never crash or read binary as text
     with tempfile.TemporaryDirectory() as d:
@@ -76,5 +101,6 @@ if __name__ == "__main__":
     test_docx()
     test_html_strips_script_and_tags()
     test_plain_text_and_raw_fallback()
+    test_docx_zip_bomb_capped()
     test_pdf_error_path()
     print("\nall docparse self-checks passed")

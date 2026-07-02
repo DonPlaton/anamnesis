@@ -74,9 +74,19 @@ def save_guards(guards: list[dict]) -> None:
 
 # ── ReDoS-safe pattern validation ─────────────────────────────────────
 # Patterns can come from an LLM and run against agent-authored text, so a catastrophic
-# backtracking pattern would be a self-inflicted DoS. We reject the dangerous shapes
-# (nested quantifiers) and cap length, then require the regex to compile.
-_NESTED_QUANT = re.compile(r"(\([^)]*[+*][^)]*\)[+*])|(\[[^\]]*\][+*]\{)")
+# backtracking pattern would be a self-inflicted DoS on the pre-tool hot path. We reject the
+# dangerous shapes and cap length, then require the regex to compile. Two families of
+# exponential backtracking are refused:
+#   * nested quantifiers on a group/class:      (ab+)+  ,  [ab]+{
+#   * a quantified group containing alternation: (a|aa)+ ,  (foo|foobar)*  — the classic
+#     overlapping-alternation blowup the round-1 check missed (code-review, 2026-07).
+# stdlib `re` has no match timeout, so validation-at-creation is the only guard; combined with
+# the 20k input cap in check(), a guard that passes here cannot stall the agent.
+_NESTED_QUANT = re.compile(
+    r"(\([^)]*[+*][^)]*\)[+*])"            # nested quantifier: (…+…)+
+    r"|(\[[^\]]*\][+*]\{)"                 # class then +/* then {
+    r"|(\([^)]*\|[^)]*\)\s*[+*])"          # quantified alternation group: (a|aa)+
+)
 
 
 def safe_pattern(pat: str) -> bool:

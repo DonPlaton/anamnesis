@@ -222,7 +222,7 @@ def build_html(project=None, days=30, conflicts_limit=40) -> str:
                      '<th></th><th>added</th><th>revised</th><th>types</th></tr></thead><tbody>')
         for p, v in sorted(bp.items(), key=lambda kv: -kv[1]["total"]):
             w = max(4, round(100 * v["total"] / mx))
-            pills = " ".join(f'<span class="pill"><i class="dot-{k}"></i>{_e(k)} {c}</span>'
+            pills = " ".join(f'<span class="pill"><i class="dot-{_e(k)}"></i>{_e(k)} {c}</span>'
                              for k, c in sorted(v["by_type"].items()))
             parts.append(f'<tr><td class="proj">{_e(p)}</td><td class="count">{v["total"]}</td>'
                          f'<td class="bar-cell"><div class="bar-track"><div class="bar" '

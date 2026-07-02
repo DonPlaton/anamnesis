@@ -47,7 +47,7 @@ def compute_conflicts(project=None, limit=50):
     'superseded' today (M-2 turns a detected contradiction into a supersession at write
     time); the field is kept so an explicit unresolved-CONTRADICTS kind can join later."""
     sup = m._iter_superseded_notes(project)
-    by_stem = {n["stem"]: n for n in (_live_notes(project) + sup)}
+    by_stem = {n["stem"]: n for n in (_live_notes(project) + sup) if "stem" in n}
     out = []
     for old in sup:
         succ_stem = (old.get("superseded_by") or "").strip()
