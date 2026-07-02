@@ -44,6 +44,7 @@ jobs:
           python anamnesis/_test_guards.py
           python anamnesis/_test_anticipate.py
           python anamnesis/_test_causal.py
+          python anamnesis/_test_merge.py
           python anamnesis/research/_test_qa_eval.py
           python anamnesis/research/_test_longitudinal.py
           python anamnesis/research/_test_live_validation.py

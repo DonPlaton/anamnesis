@@ -44,6 +44,14 @@ def main() -> int:
               file=sys.stderr)
         return 0
 
+    # 0) install the structured merge driver so a concurrent-write conflict on a note
+    #    (recurrence bump / supersession) auto-resolves instead of stopping the sync (idempotent).
+    try:
+        from . import merge as _merge
+    except ImportError:
+        import merge as _merge
+    _merge.register(m.VAULT)
+
     # 1) commit local changes (if any)
     if (_git("status", "--porcelain").stdout or "").strip():
         _git("add", "-A")
