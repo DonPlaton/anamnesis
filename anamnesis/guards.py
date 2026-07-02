@@ -151,6 +151,10 @@ def check(action_text: str, *, project=None, path=None, tool=None,
     if not action_text:
         return []
     text = action_text[:MAX_CHECK_CHARS]
+    if project:
+        project = m.slug_project(project)      # guards are stored under the slugged project name;
+                                               # slug the arg so a raw name ("svc-000") still matches
+                                               # ("svc_000"). Idempotent — slug(slug(x)) == slug(x).
     guards = load_guards() if guards is None else guards
     hits = []
     for g in guards:
@@ -242,6 +246,36 @@ def mark_fired(guard_id: str, session_id=None, guards=None, persist=True) -> Non
 
 # ── generation from mistakes (sleep-time, off the hot path) ───────────
 
+# Well-known coding anti-patterns: if a mistake's text matches all the keywords, use the precise
+# regex that matches the BUGGY construct (not the fix). This lifts the no-LLM generator from
+# "coarse code-token" to real repeat-matching on the universal pitfalls, without any model. Each
+# regex is ReDoS-safe (validated by safe_pattern before use). The LLM path still handles the
+# long tail of project-specific mistakes; this just makes the offline floor genuinely useful.
+_ANTIPATTERN_RULES = [
+    (("sql", "f-string"), r"execute\s*\(\s*f[\"']"),
+    (("sql", "format"), r"execute\s*\(\s*[\"'].*%[s(]"),
+    (("float", "money"), r"\bfloat\s*\("),
+    (("float", "price"), r"\bfloat\s*\("),
+    (("json", "status"), r"\.json\(\)"),
+    (("json", "response.ok"), r"\.json\(\)"),
+    (("bare", "except"), r"except\s*:"),
+    (("mutable", "default"), r"def\s+\w+\([^)]*=\s*(\[\s*\]|\{\s*\})"),
+    (("iterat", "modif"), r"for\s+\w+\s+in\s+\w+\s*:"),
+    (("eval",), r"\beval\s*\("),
+    (("shell", "true"), r"shell\s*=\s*True"),
+]
+
+
+def _antipattern_for(note: dict) -> str | None:
+    """Match the mistake against the known anti-pattern rules (all keywords present in the
+    combined text). Returns the precise buggy-construct regex, or None."""
+    blob = f"{note.get('title','')} {note.get('desc','')} {note.get('prevention','')}".lower()
+    for keywords, pat in _ANTIPATTERN_RULES:
+        if all(kw in blob for kw in keywords) and safe_pattern(pat):
+            return pat
+    return None
+
+
 # Distinctive code-like tokens that make a usable literal pattern, in preference order: a
 # backtick-quoted symbol, a dotted call (`torch.device`), a quoted string literal ('cpu'),
 # then an assert target. Case-insensitive. Used only when no LLM is up — the LLM path is the
@@ -256,9 +290,12 @@ _CODEISH = re.compile(
 
 
 def _deterministic_pattern(note: dict) -> str | None:
-    """A no-LLM fallback: lift the most distinctive code-like token from the mistake (desc
-    first — that is the failure itself — then title/prevention) and make a literal pattern.
-    Coarse by design; the LLM path produces the precise mistake-repeat pattern."""
+    """A no-LLM fallback: first try the known anti-pattern rules (which match the BUGGY
+    construct precisely), then fall back to lifting the most distinctive code-like token from
+    the mistake. The LLM path produces the precise mistake-repeat pattern for the long tail."""
+    rule = _antipattern_for(note)
+    if rule:
+        return rule
     for field in (note.get("desc", ""), note.get("title", ""), note.get("prevention", "")):
         best = None
         for mobj in _CODEISH.finditer(field or ""):

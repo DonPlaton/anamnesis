@@ -3,6 +3,7 @@
 path, scope matching, the Popperian lifecycle (advisory→blocking→retired), ReDoS-safe
 pattern validation, override-as-feedback, and deterministic generation from a mistake.
 Points the ledger at a temp dir and mocks the note iterators — no network, no real vault."""
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -115,6 +116,36 @@ def test_generate_from_vault_dedups():
     print("ok test_generate_from_vault_dedups")
 
 
+def test_antipattern_rules_match_the_bug():
+    # a mistake about f-string SQL → a guard whose pattern matches the BUGGY construct,
+    # not the fix (the deterministic anti-pattern rules, no LLM)
+    note = {"stem": "s1", "ntype": "mistake", "project": "p", "title": "sql-built-by-fstring",
+            "desc": "a filter was interpolated into the SQL string",
+            "prevention": "never build SQL by f-string — use query parameters"}
+    g = G.propose_from_mistake(note, use_llm=False)
+    assert g is not None
+    assert re.search(g["pattern"], "cursor.execute(f\"SELECT * FROM t WHERE id='{x}'\")"), g["pattern"]
+    assert not re.search(g["pattern"], "cursor.execute('SELECT 1', (x,))")   # fix code stays silent
+    # float-money
+    fm = {"stem": "s2", "ntype": "mistake", "project": "p", "title": "float money drift",
+          "desc": "storing prices as float caused rounding drift", "prevention": "use Decimal"}
+    gf = G.propose_from_mistake(fm, use_llm=False)
+    assert gf and re.search(gf["pattern"], "total = float(request.form['amount'])")
+    print("ok test_antipattern_rules_match_the_bug")
+
+
+def test_check_slugs_project_argument():
+    with tempfile.TemporaryDirectory() as t:
+        _isolate(t)
+        m.slug_project = lambda s: (s or "").lower().replace("-", "_")   # real slug behaviour
+        g = G.make_guard(r"eval\(", "avoid eval", project="svc_000")     # stored slugged
+        G.save_guards([g])
+        # a caller passing the RAW (unslugged) project name must still match
+        assert G.check("eval(x)", project="svc-000")
+        assert G.check("eval(x)", project="svc_000")
+        print("ok test_check_slugs_project_argument")
+
+
 def test_pretooluse_hotpath_silent_and_fires():
     import io
     with tempfile.TemporaryDirectory() as t:
@@ -171,6 +202,8 @@ if __name__ == "__main__":
     test_blocking_sorts_before_advisory()
     test_deterministic_generation_from_mistake()
     test_generate_from_vault_dedups()
+    test_antipattern_rules_match_the_bug()
+    test_check_slugs_project_argument()
     test_pretooluse_hotpath_silent_and_fires()
     test_pretooluse_enforce_denies_blocking()
     print("\nall guards self-checks passed")
